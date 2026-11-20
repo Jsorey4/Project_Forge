@@ -6,7 +6,7 @@
  * @traces SE-FR-11, UC-08, UC-09, UC-10, UC-11
  */
 import { api } from '../../services/apiClient';
-import type { DemoUser, LoginResponse, MfaSetup, OutboxMessage, User } from '../../shared/types';
+import type { DemoUser, LoginResponse, MfaSetup, OutboxMessage, RegistrationResult, User } from '../../shared/types';
 
 export interface SignupInput {
   username: string;
@@ -16,7 +16,7 @@ export interface SignupInput {
 }
 
 export const authController = {
-  signup: (input: SignupInput) => api.post<LoginResponse>('/api/auth/signup', input, { retry: false, skipAuthRedirect: true }),
+  signup: (input: SignupInput) => api.post<RegistrationResult>('/api/auth/signup', input, { retry: false, skipAuthRedirect: true }),
   login: (email: string, password: string) =>
     api.post<LoginResponse>('/api/auth/login', { email, password }, { retry: false, skipAuthRedirect: true }),
   verifyMfa: (tempToken: string, code: string) =>

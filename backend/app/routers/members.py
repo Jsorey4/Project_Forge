@@ -1,11 +1,12 @@
 """
 @author: Aashwat Singh
-@description: Project people management. Owners and managers can invite existing ProjectForge users,
-    remove members (optionally handing all of that person's unfinished tasks to someone else in the same
-    database transaction) and change roles. A project can never be left without an owner: demoting or
-    removing the last owner is refused with "Project must have at least one owner". Only an owner may grant
-    or take away the owner role. Every change notifies the affected person, and the new role applies on
-    their very next request because permissions are re-checked server-side each time.
+@description: Who is in a project and what they may do. An owner or manager invites an existing user (by
+    username or email); the invitation stays "pending" and changes nothing until the invitee accepts it
+    from their own account (or declines it). Owners and managers can see and cancel pending invitations,
+    remove members (optionally handing their open tasks to someone else) and change roles. Every action
+    re-checks the caller's current role in the database, and a project can never be left without an owner:
+    membership changes run one after the other under a per-project lock so two simultaneous requests
+    cannot both pass the "is another owner left?" check.
 @traces: SE-FR-30, SE-NFR-11, UC-19, UC-20
 """
 
@@ -13,19 +14,22 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, or_, select, update
-from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session, aliased
 
 from app.core.database import get_db, utcnow
 from app.core.permissions import ALL_ROLES, MANAGERS, OWNER, get_membership, require_project_role
 from app.core.realtime import hub
 from app.core.security import get_current_user
-from app.models.entities import Project, ProjectMember, Task, TimeEntry, UserProfile
+from app.models.entities import Invitation, Project, ProjectMember, Task, TimeEntry, UserProfile
 from app.routers.collaboration import create_notifications, publish_notifications
 from app.routers.projects import CARD_PALETTE, list_members, project_member_ids
 from app.routers.time_tracking import finish_entry
-from app.schemas.dto import InviteRequest, MemberOut, RemoveMemberResult, RoleChangeRequest
+from app.schemas.dto import InvitationOut, InviteRequest, MemberOut, RemoveMemberResult, RoleChangeRequest, UserBrief
 
 router = APIRouter(prefix="/api/projects/{project_id}/members", tags=["members"])
+# The invitee's side (UC-19): see my pending invitations, accept or decline one.
+invitations_router = APIRouter(prefix="/api/invitations", tags=["invitations"])
 
 LAST_OWNER = "Project must have at least one owner"
 OWNER_ONLY = "Only an owner can grant or remove the owner role"
@@ -91,11 +95,44 @@ def get_members(project_id: str, user: UserProfile = Depends(get_current_user), 
     return list_members(db, project_id)
 
 
-@router.post("/invite", response_model=MemberOut, status_code=status.HTTP_201_CREATED)
+def _invitation_out(inv: Invitation, project_name: str, inviter: UserProfile | None, invitee: UserProfile) -> InvitationOut:
+    return InvitationOut(
+        id=inv.id,
+        project_id=inv.project_id,
+        project_name=project_name,
+        role=inv.role,
+        status=inv.status,
+        invited_by=UserBrief.model_validate(inviter) if inviter else None,
+        invitee=UserBrief.model_validate(invitee),
+        created_at=inv.created_at,
+        responded_at=inv.responded_at,
+    )
+
+
+def _load_invitations(db: Session, where) -> list[InvitationOut]:
+    """Invitations with the project, inviter and invitee loaded in one query (no per-row lookups)."""
+    inviter = aliased(UserProfile)
+    invitee = aliased(UserProfile)
+    rows = db.execute(
+        select(Invitation, Project.name, inviter, invitee)
+        .join(Project, Project.id == Invitation.project_id)
+        .join(invitee, invitee.id == Invitation.invitee_id)
+        .outerjoin(inviter, inviter.id == Invitation.invited_by)
+        .where(where)
+        .order_by(Invitation.created_at.desc(), Invitation.id)
+    ).all()
+    return [_invitation_out(inv, name, by, to) for inv, name, by, to in rows]
+
+
+@router.post("/invite", response_model=InvitationOut, status_code=status.HTTP_201_CREATED)
 def invite_member(
     project_id: str, body: InviteRequest, user: UserProfile = Depends(get_current_user), db: Session = Depends(get_db)
-) -> MemberOut:
-    """UC-19: owners / managers add an existing user by username or email."""
+) -> InvitationOut:
+    """UC-19: owners / managers invite an existing user by username or email.
+
+    Nothing about the project changes yet: the person gets a pending invitation (and a notification) and
+    becomes a member only when they accept it.
+    """
     require_project_role(db, user.id, project_id, MANAGERS)
     project = _lock_project(db, project_id)
     caller = _require_fresh_role(db, user.id, project_id, MANAGERS)
@@ -107,35 +144,149 @@ def invite_member(
     ).scalar_one_or_none()
     if invitee is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No ProjectForge user has that username or email")
-    if get_membership(db, invitee.id, project_id) is not None:
+    if _fresh_membership(db, invitee.id, project_id) is not None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="That person is already a member of this project")
-    next_order = int(
-        db.execute(
-            select(func.coalesce(func.max(ProjectMember.card_order), -1)).where(ProjectMember.user_id == invitee.id)
-        ).scalar_one()
-    ) + 1
+    pending = db.execute(
+        select(Invitation.id).where(Invitation.project_id == project_id, Invitation.invitee_id == invitee.id, Invitation.status == "pending")
+    ).first()
+    if pending:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="That person already has a pending invitation to this project")
+    invitation = Invitation(project_id=project_id, invitee_id=invitee.id, invited_by=user.id, role=body.role, status="pending", created_at=utcnow())
+    db.add(invitation)
+    db.flush()
+    notes = create_notifications(
+        db,
+        [invitee.id],
+        kind="invitation",
+        message=f"{user.display_name or user.username} invited you to join “{project.name}” as {body.role}",
+        link="/projects",
+    )
+    try:
+        db.commit()
+    except IntegrityError:  # a simultaneous identical invitation won the unique index
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="That person already has a pending invitation to this project") from None
+    publish_notifications(notes)
+    hub.publish([invitee.id], "invitation", {"project_id": project_id, "invitation_id": invitation.id})
+    return _invitation_out(invitation, project.name, user, invitee)
+
+
+@router.get("/invitations", response_model=list[InvitationOut])
+def list_project_invitations(
+    project_id: str, user: UserProfile = Depends(get_current_user), db: Session = Depends(get_db)
+) -> list[InvitationOut]:
+    """UC-19: the project's pending invitations (owners and managers)."""
+    require_project_role(db, user.id, project_id, MANAGERS)
+    return _load_invitations(db, (Invitation.project_id == project_id) & (Invitation.status == "pending"))
+
+
+@router.delete("/invitations/{invitation_id}", response_model=InvitationOut)
+def cancel_invitation(
+    project_id: str, invitation_id: str, user: UserProfile = Depends(get_current_user), db: Session = Depends(get_db)
+) -> InvitationOut:
+    """UC-19: withdraw a pending invitation (owners and managers of that project only)."""
+    require_project_role(db, user.id, project_id, MANAGERS)
+    invitation = db.get(Invitation, invitation_id)
+    if invitation is None or invitation.project_id != project_id:  # another project's invitation is "not found"
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invitation not found")
+    if invitation.status != "pending":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This invitation has already been answered")
+    invitation.status = "cancelled"
+    invitation.responded_at = utcnow()
+    db.commit()
+    hub.publish([invitation.invitee_id], "invitation", {"project_id": project_id, "invitation_id": invitation.id})
+    return _load_invitations(db, Invitation.id == invitation.id)[0]
+
+
+@invitations_router.get("", response_model=list[InvitationOut])
+def my_invitations(user: UserProfile = Depends(get_current_user), db: Session = Depends(get_db)) -> list[InvitationOut]:
+    """UC-19: invitations waiting for the signed-in person (only ever their own)."""
+    return _load_invitations(db, (Invitation.invitee_id == user.id) & (Invitation.status == "pending"))
+
+
+def _answerable(db: Session, user: UserProfile, invitation_id: str) -> Invitation:
+    invitation = db.get(Invitation, invitation_id)
+    # Someone else's invitation is reported exactly like one that does not exist.
+    if invitation is None or invitation.invitee_id != user.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invitation not found")
+    if invitation.status != "pending":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This invitation has already been answered")
+    return invitation
+
+
+@invitations_router.post("/{invitation_id}/accept", response_model=InvitationOut)
+def accept_invitation(invitation_id: str, user: UserProfile = Depends(get_current_user), db: Session = Depends(get_db)) -> InvitationOut:
+    """UC-19: the invitee joins the project with the invited role.
+
+    The invitation is only honoured while the person who sent it is still allowed to grant that role
+    (an owner / manager for member and manager; an owner for owner), so a stale invitation cannot be
+    used after its sender lost their rights or left the project.
+    """
+    invitation = _answerable(db, user, invitation_id)
+    project_id = invitation.project_id
+    project = _lock_project(db, project_id)
+    db.refresh(invitation)  # re-read under the project lock
+    if invitation.status != "pending":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This invitation has already been answered")
+    sender = _fresh_membership(db, invitation.invited_by, project_id) if invitation.invited_by else None
+    allowed = {OWNER} if invitation.role == OWNER else MANAGERS
+    if sender is None or sender.role not in allowed:
+        invitation.status = "cancelled"
+        invitation.responded_at = utcnow()
+        db.commit()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This invitation is no longer valid. Ask for a new one.")
+    if _fresh_membership(db, user.id, project_id) is not None:
+        invitation.status = "accepted"
+        invitation.responded_at = utcnow()
+        db.commit()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="You are already a member of this project")
+    next_order = int(db.execute(select(func.coalesce(func.max(ProjectMember.card_order), -1)).where(ProjectMember.user_id == user.id)).scalar_one()) + 1
     db.add(
         ProjectMember(
             project_id=project_id,
-            user_id=invitee.id,
-            role=body.role,
+            user_id=user.id,
+            role=invitation.role,
             card_color=CARD_PALETTE[next_order % len(CARD_PALETTE)],
             card_order=next_order,
             joined_at=utcnow(),
         )
     )
+    invitation.status = "accepted"
+    invitation.responded_at = utcnow()
     notes = create_notifications(
         db,
-        [invitee.id],
-        kind="member_added",
-        message=f"{user.display_name or user.username} added you to “{project.name}” as {body.role}",
+        [invitation.invited_by] if invitation.invited_by else [],
+        kind="invitation_response",
+        message=f"{user.display_name or user.username} accepted your invitation to “{project.name}”",
         project_id=project_id,
-        link=f"/projects/{project_id}",
+        link=f"/people?project={project_id}",
     )
     db.commit()
     publish_notifications(notes)
-    hub.publish(project_member_ids(db, project_id), "membership_changed", {"project_id": project_id, "user_id": invitee.id})
-    return _member_out(db, project_id, invitee.id)
+    hub.publish(project_member_ids(db, project_id), "membership_changed", {"project_id": project_id, "user_id": user.id})
+    hub.publish([user.id], "project_created", {"project_id": project_id, "name": project.name})
+    return _load_invitations(db, Invitation.id == invitation.id)[0]
+
+
+@invitations_router.post("/{invitation_id}/decline", response_model=InvitationOut)
+def decline_invitation(invitation_id: str, user: UserProfile = Depends(get_current_user), db: Session = Depends(get_db)) -> InvitationOut:
+    """UC-19: the invitee says no; nothing about the project changes."""
+    invitation = _answerable(db, user, invitation_id)
+    project = db.get(Project, invitation.project_id)
+    invitation.status = "declined"
+    invitation.responded_at = utcnow()
+    notes = create_notifications(
+        db,
+        [invitation.invited_by] if invitation.invited_by else [],
+        kind="invitation_response",
+        message=f"{user.display_name or user.username} declined your invitation to “{project.name if project else 'the project'}”",
+        project_id=invitation.project_id,
+        link=f"/people?project={invitation.project_id}",
+    )
+    db.commit()
+    publish_notifications(notes)
+    hub.publish([invitation.invited_by] if invitation.invited_by else [], "invitation", {"project_id": invitation.project_id, "invitation_id": invitation.id})
+    return _load_invitations(db, Invitation.id == invitation.id)[0]
 
 
 @router.delete("/{user_id}", response_model=RemoveMemberResult)
@@ -236,10 +387,12 @@ def change_role(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member not found")
     if body.role == target.role:
         return _member_out(db, project_id, user_id)
-    if target.role == OWNER and body.role != OWNER and _owner_count(db, project_id) <= 1:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=LAST_OWNER)
+    # Authorization before the invariant: a manager is refused (403) for touching the owner role at all, so the
+    # response never reveals whether the project has a single owner. Only an owner reaches the last-owner check.
     if (target.role == OWNER or body.role == OWNER) and caller.role != OWNER:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=OWNER_ONLY)
+    if target.role == OWNER and body.role != OWNER and _owner_count(db, project_id) <= 1:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=LAST_OWNER)
     previous = target.role
     target.role = body.role
     notes = []

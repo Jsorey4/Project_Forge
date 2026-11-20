@@ -20,6 +20,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session, joinedload
 
+from app.core.config import get_settings
 from app.core.database import get_db, utcnow
 from app.core.permissions import ALL_ROLES, MANAGERS, get_membership, require_task_access
 from app.core.realtime import hub
@@ -41,6 +42,7 @@ from app.schemas.dto import (
     CommentOut,
     NotificationList,
     NotificationOut,
+    ReminderRunResult,
     UserBrief,
 )
 
@@ -254,7 +256,11 @@ def delete_comment(
 # Notifications & deadline reminders
 # ---------------------------------------------------------------------------
 def ensure_deadline_reminders(db: Session, user: UserProfile) -> list[Notification]:
-    """Creates (once) reminders for the user's open tasks / soft deadlines due within 24 hours."""
+    """Creates (once) reminders for the user's open tasks / soft deadlines due within 24 hours.
+
+    Called by the reminder job and the manual trigger only; reading the notification list never creates
+    anything. The dedupe key makes a repeat run a no-op.
+    """
     now = utcnow()
     horizon = now + REMINDER_WINDOW
     created: list[Notification] = []
@@ -323,6 +329,31 @@ def ensure_deadline_reminders(db: Session, user: UserProfile) -> list[Notificati
     return created
 
 
+def run_deadline_reminders(db: Session) -> tuple[int, list[Notification]]:
+    """The deadline-reminder job (UC-22): creates reminders for everyone with work due in the next 24 hours.
+
+    Finds the people who have an open assigned task or soft deadline coming up with two grouped queries,
+    then creates their reminders (skipping any that already exist, so running it twice changes nothing).
+    Returns (people checked, new reminders). The caller publishes the new rows after the commit.
+    """
+    now = utcnow()
+    horizon = now + REMINDER_WINDOW
+    task_users = select(Task.assignee_id).where(
+        Task.assignee_id.is_not(None), Task.status != "done", Task.due_date > now, Task.due_date <= horizon
+    )
+    soft_users = (
+        select(Task.assignee_id)
+        .join(SoftDeadline, SoftDeadline.task_id == Task.id)
+        .where(Task.assignee_id.is_not(None), SoftDeadline.is_completed.is_(False), SoftDeadline.due_at > now, SoftDeadline.due_at <= horizon)
+    )
+    user_ids = set(db.execute(task_users).scalars()) | set(db.execute(soft_users).scalars())
+    created: list[Notification] = []
+    users = db.execute(select(UserProfile).where(UserProfile.id.in_(list(user_ids) or [""]))).scalars().all()
+    for person in users:
+        created.extend(ensure_deadline_reminders(db, person))
+    return len(users), created
+
+
 def unread_count(db: Session, user_id: str) -> int:
     return int(
         db.execute(
@@ -340,8 +371,7 @@ def list_notifications(
     user: UserProfile = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> NotificationList:
-    """UC-22: the user's notifications (mentions, assignments, role changes) plus deadline reminders."""
-    ensure_deadline_reminders(db, user)
+    """UC-22: the user's notifications (mentions, assignments, invitations, role changes, reminders)."""
     stmt = select(Notification).where(Notification.user_id == user.id)
     if unread_only:
         stmt = stmt.where(Notification.is_read.is_(False))
@@ -350,6 +380,23 @@ def list_notifications(
         items=[NotificationOut.model_validate(r) for r in rows],
         unread_count=unread_count(db, user.id),
     )
+
+
+@router.post("/api/notifications/reminders/run", response_model=ReminderRunResult)
+def run_reminders_now(user: UserProfile = Depends(get_current_user), db: Session = Depends(get_db)) -> ReminderRunResult:
+    """UC-22: run the deadline-reminder job on demand, so it can be shown and checked without waiting.
+
+    In demo mode this is the same job the server runs on its timer (everyone's reminders). Otherwise a
+    person can only trigger their own reminders. New reminders reach their owners live over the WebSocket.
+    """
+    if get_settings().demo_mode:
+        checked, created = run_deadline_reminders(db)
+        scope = "all"
+    else:
+        created = ensure_deadline_reminders(db, user)
+        checked, scope = 1, "self"
+    publish_notifications(created)
+    return ReminderRunResult(scope=scope, users_checked=checked, reminders_created=len(created), mine=sum(1 for n in created if n.user_id == user.id))
 
 
 @router.patch("/api/notifications/read-all", response_model=NotificationList)

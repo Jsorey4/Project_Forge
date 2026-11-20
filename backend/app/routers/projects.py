@@ -16,7 +16,7 @@ from decimal import ROUND_HALF_UP, Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from fastapi.responses import JSONResponse
-from sqlalchemy import case, delete, func, select
+from sqlalchemy import case, delete, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db, utcnow
@@ -273,17 +273,27 @@ def list_projects(user: UserProfile = Depends(get_current_user), db: Session = D
 def create_project(
     body: ProjectCreate, user: UserProfile = Depends(get_current_user), db: Session = Depends(get_db)
 ):
-    """UC-12: validate fields, bulk-check members in one query, save creator as owner, broadcast."""
+    """UC-12: validate fields, bulk-check members in one query, save creator as owner, broadcast.
+
+    Members may be listed by username or by email address. Anyone listed who has no account is reported
+    back so the creator can remove them or invite them once they have signed up.
+    """
     if body.deadline <= utcnow():
         raise FieldValidationError({"deadline": "Deadline must be in the future"})
 
-    requested = [name for name in body.members if name.lower() != user.username.lower()]
+    me = {user.username.lower(), user.email.lower()}
+    requested = [name for name in body.members if name.lower() not in me]
     found: dict[str, UserProfile] = {}
     if requested:
-        # Single O(M) set query - no N+1 lookups even for 50+ members (SE-NFR-09).
+        # Single O(M) set query - no N+1 lookups even for 50+ members (SE-NFR-09). Each entry is matched
+        # against usernames and emails in the same statement.
         lowered = [name.lower() for name in requested]
-        users = db.execute(select(UserProfile).where(func.lower(UserProfile.username).in_(lowered))).scalars().all()
-        found = {u.username.lower(): u for u in users}
+        users = db.execute(
+            select(UserProfile).where(or_(func.lower(UserProfile.username).in_(lowered), func.lower(UserProfile.email).in_(lowered)))
+        ).scalars().all()
+        for u in users:
+            found[u.username.lower()] = u
+            found[u.email.lower()] = u
     unknown = [name for name in requested if name.lower() not in found]
     if unknown:
         return JSONResponse(
@@ -321,7 +331,7 @@ def create_project(
             joined_at=now,
         )
     )
-    member_users = list({u.id: u for u in found.values()}.values())
+    member_users = list({u.id: u for u in found.values() if u.id != user.id}.values())
     if member_users:
         orders = dict(
             db.execute(

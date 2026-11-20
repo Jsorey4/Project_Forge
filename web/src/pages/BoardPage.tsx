@@ -3,9 +3,11 @@
  * @description The task board for the current project: To Do / In Progress / Review / Done columns with
  *   drag-and-drop (Task.moveTo) and a Task details panel for the selected card (status, due date, priority,
  *   assignee, tags, soft deadlines). Moves appear instantly and are rolled back if the server refuses them or
- *   the connection fails (with Retry). Filters by text, assignee, tag and feature list. Only owners and
- *   managers see "New task"; members can drag only the tasks assigned to them. Escape closes the task
- *   details panel.
+ *   the connection fails (with Retry). Filters by text, assignee, tag and feature list. A "Lists" bar shows
+ *   the feature lists (owners and managers create, rename and delete them) and a round check on each card
+ *   completes or reopens a task in one click. The details panel can move a task to another list. Only
+ *   owners and managers see "New task"; members can update only the tasks assigned to them. Escape closes
+ *   the task details panel.
  * @traces SE-FR-26, SE-FR-27, SE-FR-18, SE-NFR-04, SE-NFR-10, SE-NFR-11, UC-18
  */
 import { useCallback, useEffect, useMemo, useState, type DragEvent, type ReactNode } from 'react';
@@ -14,6 +16,7 @@ import { useAuth } from '../features/auth/AuthProvider';
 import { projectController } from '../features/projects/projectController';
 import { ProjectPicker, useProjectScope } from '../features/projects/ProjectScope';
 import { TaskCard } from '../features/tasks/TaskCard';
+import { ListManager } from '../features/tasks/ListManager';
 import { TaskForm } from '../features/tasks/TaskForm';
 import { BOARD_COLUMNS, Membership, applyMove, canEditTask, filterTasks, groupByStatus, isOverdue, type TaskFilters } from '../features/tasks/model';
 import { taskController } from '../features/tasks/taskController';
@@ -35,7 +38,7 @@ function DetailRow({ label, children }: { label: string; children: ReactNode }) 
   );
 }
 
-function TaskDetailsPanel({ task, project, onClose }: { task: Task | undefined; project: ProjectDetail; onClose?: () => void }) {
+function TaskDetailsPanel({ task, project, onClose, canEdit = false, onMoveToList }: { task: Task | undefined; project: ProjectDetail; onClose?: () => void; canEdit?: boolean; onMoveToList?: (task: Task, listId: string | null) => void }) {
   if (!task) {
     return (
       <aside className="card p-6">
@@ -60,7 +63,19 @@ function TaskDetailsPanel({ task, project, onClose }: { task: Task | undefined; 
         <DetailRow label="Assigned to">
           {task.assignee ? <><Avatar name={task.assignee.display_name} url={task.assignee.avatar_url} size="h-7 w-7" text="text-[11px]" />{task.assignee.display_name}</> : <span className="font-normal italic text-muted">Unassigned</span>}
         </DetailRow>
-        <DetailRow label="List">{list?.name ?? '—'}</DetailRow>
+        <DetailRow label="List">
+          {canEdit && onMoveToList ? (
+            <select
+              className="input h-9 w-44 py-0 text-sm"
+              value={task.list_id ?? ''}
+              aria-label="Move task to list"
+              onChange={(e) => onMoveToList(task, e.target.value || null)}
+            >
+              <option value="">No list</option>
+              {project.lists.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+            </select>
+          ) : (list?.name ?? '—')}
+        </DetailRow>
         <DetailRow label="Tags">
           {task.tags.length ? task.tags.map((t) => <span key={t} className="rounded-lg bg-line px-2.5 py-1 text-xs font-semibold text-body">{t}</span>) : <span className="font-normal text-muted">—</span>}
         </DetailRow>
@@ -151,6 +166,37 @@ export function BoardPage() {
     }
   };
 
+  // One-click completion (UC-18): done <-> to do, shown at once and rolled back if the server refuses.
+  const toggleDone = async (task: Task) => {
+    if (!tasks) return;
+    const before = tasks;
+    const status: TaskStatus = task.status === 'done' ? 'todo' : 'done';
+    setTasks(tasks.map((t) => (t.id === task.id ? { ...t, status, completed_at: status === 'done' ? new Date().toISOString() : null } : t)));
+    try {
+      await taskController.update(task.id, { status });
+      setError(null);
+      await load();
+    } catch (err) {
+      setTasks(before);
+      setError(toApiError(err).detail);
+    }
+  };
+
+  // Task.moveTo(list, position): same column, same place in it, different list.
+  const moveToList = async (task: Task, listId: string | null) => {
+    if (!tasks) return;
+    const before = tasks;
+    setTasks(tasks.map((t) => (t.id === task.id ? { ...t, list_id: listId } : t)));
+    try {
+      await taskController.moveTo(task.id, task.position, task.status, listId);
+      setError(null);
+      await load();
+    } catch (err) {
+      setTasks(before);
+      setError(toApiError(err).detail);
+    }
+  };
+
   const onDragStart = (e: DragEvent<HTMLElement>, task: Task) => {
     setDragId(task.id);
     e.dataTransfer.effectAllowed = 'move';
@@ -220,6 +266,15 @@ export function BoardPage() {
           {tags.map((t) => <option key={t} value={t}>#{t}</option>)}
         </select>
       </div>
+      <ListManager
+        projectId={project.id}
+        lists={project.lists}
+        tasks={tasks}
+        canManage={canCreate}
+        activeListId={filters.listId}
+        onFilter={(listId) => setFilters({ ...filters, listId })}
+        onChanged={load}
+      />
       <div className="mb-4 space-y-3 empty:hidden">
         {error ? <Alert onClose={() => setError(null)}>{error} The card was moved back.</Alert> : null}
         <RetryBanner error={failedMove?.error ?? null} onRetry={() => failedMove && void commitMove(failedMove.taskId, failedMove.status, failedMove.index)} onCancel={() => setFailedMove(null)} />
@@ -252,6 +307,7 @@ export function BoardPage() {
                     selected={task.id === selectedId}
                     onSelect={(t) => setSelectedId(t.id)}
                     onOpen={(t) => navigate(`/tasks/${t.id}`)}
+                    onToggleDone={canEditTask(project.my_role, task, user?.id) ? (t) => void toggleDone(t) : undefined}
                     onDragStart={onDragStart}
                   />
                 ))}
@@ -263,7 +319,7 @@ export function BoardPage() {
         {selected ? (
           // Below 1536px the panel slides in from the right so the four columns keep the mockup's card width.
           <div className="fixed inset-y-0 right-0 z-40 w-full max-w-[360px] overflow-y-auto border-l border-line bg-canvas p-4 shadow-pop 2xl:sticky 2xl:top-8 2xl:z-auto 2xl:max-w-none 2xl:self-start 2xl:overflow-visible 2xl:border-0 2xl:bg-transparent 2xl:p-0 2xl:shadow-none">
-            <TaskDetailsPanel task={selected} project={project} onClose={() => setSelectedId(null)} />
+            <TaskDetailsPanel task={selected} project={project} onClose={() => setSelectedId(null)} canEdit={canEditTask(project.my_role, selected, user?.id)} onMoveToList={(t, listId) => void moveToList(t, listId)} />
           </div>
         ) : (
           <div className="hidden 2xl:sticky 2xl:top-8 2xl:block 2xl:self-start">

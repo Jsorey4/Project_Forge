@@ -229,6 +229,14 @@ class UserBrief(ORMModel):
     avatar_url: str | None = None
 
 
+class RegistrationOut(BaseModel):
+    """UC-08: sign-up only confirms the registration; the person then signs in (and passes 2FA)."""
+
+    message: str
+    user: "UserBrief"
+    redirect_to: str = "/login"
+
+
 class LoginResponse(BaseModel):
     mfa_required: bool
     temp_token: str | None = None
@@ -344,6 +352,8 @@ class ProjectCreate(BaseModel):
         seen: dict[str, None] = {}
         for raw in v:
             name = raw.strip().lstrip("@")
+            if len(name) > 254:
+                raise ValueError("Each member must be a username or an email address of at most 254 characters")
             if name:
                 seen.setdefault(name, None)
         return list(seen)
@@ -683,6 +693,29 @@ class TaskDetailOut(TaskOut):
 class InviteRequest(BaseModel):
     identifier: str = Field(min_length=1, max_length=254, description="Username or email")
     role: Role = "member"
+
+
+class InvitationOut(BaseModel):
+    """UC-19: a pending (or answered) project invitation."""
+
+    id: str
+    project_id: str
+    project_name: str
+    role: Role
+    status: Literal["pending", "accepted", "declined", "cancelled"]
+    invited_by: UserBrief | None
+    invitee: UserBrief
+    created_at: UTCDateTimeOut
+    responded_at: UTCDateTimeOut | None = None
+
+
+class ReminderRunResult(BaseModel):
+    """UC-22: what one run of the deadline-reminder job did."""
+
+    scope: Literal["all", "self"]
+    users_checked: int
+    reminders_created: int
+    mine: int
 
 
 class RoleChangeRequest(BaseModel):

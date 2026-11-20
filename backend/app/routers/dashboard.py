@@ -3,7 +3,7 @@
 @description: The personal dashboard. Returns the user's widget layout together with all the data those
     widgets display in one response (so the page loads in under 3 seconds), filtered by the user's role in
     each project - budget figures only appear for projects where they are an owner or manager. Widgets can
-    be added, removed, hidden, moved on a 12-column grid and reset to the default layout. A move that
+    be added, removed, hidden and un-hidden, moved on a 12-column grid and reset to the default layout. A move that
     would overlap another visible widget is refused with 409 so the browser snaps the widget back.
 @traces: SE-FR-21, SE-FR-22, SE-FR-23, SE-FR-24, SE-FR-25, SE-NFR-07, SE-NFR-08, UC-16, UC-17
 """
@@ -34,7 +34,7 @@ from app.models.entities import (
     TimeEntry,
     UserProfile,
 )
-from app.routers.collaboration import ensure_deadline_reminders, unread_count
+from app.routers.collaboration import unread_count
 from app.routers.costs import money_sum
 from app.routers.projects import collect_events, percent, task_counts
 from app.schemas.dto import DashboardOut, NotificationOut, WidgetCreate, WidgetOut, WidgetPosition, WidgetTypeOut
@@ -233,7 +233,6 @@ def build_widget_data(db: Session, user: UserProfile, visible_types: set[str]) -
             }
 
     if "notifications" in visible_types:
-        ensure_deadline_reminders(db, user)
         latest = db.execute(
             select(Notification)
             .where(Notification.user_id == user.id, Notification.is_read.is_(False))
@@ -391,6 +390,21 @@ def hide_widget(widget_id: str, user: UserProfile = Depends(get_current_user), d
     if widget.is_hidden:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=INVALID_ACTION)
     widget.is_hidden = True
+    widget.updated_at = utcnow()
+    db.commit()
+    return _dashboard(db, user)
+
+
+@router.patch("/widgets/{widget_id}/show", response_model=DashboardOut)
+def show_widget(widget_id: str, user: UserProfile = Depends(get_current_user), db: Session = Depends(get_db)) -> DashboardOut:
+    """Un-hide: the widget comes back with its own size, at its old spot if free or else the first free one."""
+    widget = _own_widget(db, user.id, widget_id)
+    if not widget.is_hidden:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=INVALID_ACTION)
+    visible = [w for w in _widgets(db, user.id) if not w.is_hidden and w.id != widget.id]
+    if collides((widget.grid_x, widget.grid_y, widget.width, widget.height), visible):
+        widget.grid_x, widget.grid_y = first_free_slot(widget.width, widget.height, visible)
+    widget.is_hidden = False
     widget.updated_at = utcnow()
     db.commit()
     return _dashboard(db, user)

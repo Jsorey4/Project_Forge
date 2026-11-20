@@ -2,20 +2,19 @@
  * @author Tyler Gaines - matches signup.html
  * @description Account creation with live checks: name, username rules, email format, a password-strength
  *   meter with a checklist, and matching confirmation. Server-side problems (e.g. "That username is already
- *   taken") are shown under the exact field. On success the user is signed in and taken to the dashboard.
+ *   taken") are shown under the exact field. Too many sign-ups from one address say "Try again later". On
+ *   success nobody is signed in: the account is confirmed and the person is taken to Log In.
  * @traces SE-FR-11, SE-FR-12, UC-08
  */
 import { useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { ApiError } from '../services/apiClient';
-import { useAuth } from '../features/auth/AuthProvider';
 import { AUTH_BUTTON, AUTH_INPUT, AuthLayout } from '../features/auth/AuthLayout';
 import { authController } from '../features/auth/authController';
 import { passwordRules, passwordStrength, validateSignup } from '../features/auth/validation';
 import { Alert, Field, Icon } from '../shared/ui';
 
 export function SignUpPage() {
-  const { completeSession } = useAuth();
   const navigate = useNavigate();
   const [form, setForm] = useState({ username: '', display_name: '', email: '', password: '', confirm: '' });
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -41,8 +40,8 @@ export function SignUpPage() {
     setBusy(true);
     try {
       const response = await authController.signup({ username: form.username.trim(), email: form.email.trim(), password: form.password, display_name: form.display_name.trim() || undefined });
-      completeSession(response);
-      navigate('/dashboard', { replace: true });
+      // UC-08: the account is created, but no session starts: confirm and go to Log In.
+      navigate(response.redirect_to || '/login', { replace: true, state: { notice: response.message, email: form.email.trim() } });
     } catch (err) {
       if (err instanceof ApiError) {
         setErrors(err.errors);

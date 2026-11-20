@@ -1,6 +1,9 @@
 """
 @author: Tyler Gaines
 @description: Sign-up, log-in, two-factor verification, account lockout / unlock and password reset.
+    Sign-up only confirms the registration (no session is started); the person then logs in. In demo mode
+    every log-in has a second step: the 6-digit code (the visible demo code 123456, or a real authenticator
+    code for accounts that enrolled one).
     Log-in checks whether the account is locked BEFORE looking at the password, locks it for 30 minutes
     after 5 wrong passwords and emails a single-use unlock link. Every failure message is generic so an
     attacker cannot tell which emails have accounts. Sign-up and log-in are also limited to 5 requests
@@ -50,10 +53,12 @@ from app.schemas.dto import (
     MfaCodeRequest,
     MfaSetupResponse,
     OutboxMessageOut,
+    RegistrationOut,
     ResetPasswordConfirm,
     ResetPasswordRequest,
     SignupRequest,
     UnlockRequest,
+    UserBrief,
     UserOut,
     VerifyMfaRequest,
 )
@@ -130,9 +135,14 @@ def _register_failure(db: Session, user: UserProfile) -> None:
         )
 
 
-@router.post("/signup", response_model=LoginResponse, status_code=status.HTTP_201_CREATED)
-def signup(body: SignupRequest, db: Session = Depends(get_db)) -> LoginResponse:
-    """UC-08: create an account with validated username, email and strong password."""
+@router.post("/signup", response_model=RegistrationOut, status_code=status.HTTP_201_CREATED)
+def signup(body: SignupRequest, db: Session = Depends(get_db)) -> RegistrationOut:
+    """UC-08: create an account with validated username, email and strong password.
+
+    The password is stored only as a bcrypt hash, the new account gets the default profile (work mode,
+    dark theme) and no project role until someone invites them. The answer confirms the registration and
+    tells the browser to go to Log In; it deliberately carries no access token.
+    """
     errors: dict[str, str] = {}
     if db.execute(select(UserProfile.id).where(func.lower(UserProfile.username) == body.username.lower())).first():
         errors["username"] = "That username is already taken"
@@ -157,7 +167,11 @@ def signup(body: SignupRequest, db: Session = Depends(get_db)) -> LoginResponse:
         db.rollback()
         raise FieldValidationError({"username": "That username or email was just taken. Try another."}) from None
     db.refresh(user)
-    return _session_response(user)
+    return RegistrationOut(
+        message="Account created. Log in to continue.",
+        user=UserBrief.model_validate(user),
+        redirect_to="/login",
+    )
 
 
 @router.post("/login", response_model=LoginResponse)
@@ -186,7 +200,8 @@ def login(body: LoginRequest, db: Session = Depends(get_db)) -> LoginResponse:
     user.unlock_token_jti = None
     db.commit()
 
-    if user.mfa_enabled:
+    # UC-09 / SE-FR-11: the password alone never opens a session when a second step applies.
+    if user.mfa_enabled or (settings.require_mfa and settings.demo_mode):
         temp_token, _ = create_token(user.id, TOKEN_MFA, settings.mfa_token_minutes)
         return LoginResponse(mfa_required=True, temp_token=temp_token)
     return _session_response(user)

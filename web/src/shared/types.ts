@@ -56,6 +56,13 @@ export interface UserBrief {
   avatar_url: string | null;
 }
 
+/** UC-08: the sign-up answer. No session: the person goes to Log In next. */
+export interface RegistrationResult {
+  message: string;
+  user: UserBrief;
+  redirect_to: string;
+}
+
 export interface LoginResponse {
   mfa_required: boolean;
   temp_token: string | null;
@@ -116,6 +123,29 @@ export interface Member {
   open_task_count: number;
   task_count: number;
   done_task_count: number;
+}
+
+export type InvitationStatus = 'pending' | 'accepted' | 'declined' | 'cancelled';
+
+/** UC-19: an invitation to a project. The invitee becomes a member only by accepting it. */
+export interface Invitation {
+  id: string;
+  project_id: string;
+  project_name: string;
+  role: Role;
+  status: InvitationStatus;
+  invited_by: UserBrief | null;
+  invitee: UserBrief;
+  created_at: string;
+  responded_at: string | null;
+}
+
+/** UC-22: what one run of the deadline-reminder job did. */
+export interface ReminderRunResult {
+  scope: 'all' | 'self';
+  users_checked: number;
+  reminders_created: number;
+  mine: number;
 }
 
 export interface Project {

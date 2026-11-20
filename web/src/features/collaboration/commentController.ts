@@ -5,7 +5,7 @@
  * @traces SE-FR-28, SE-FR-29, UC-21, UC-22
  */
 import { api } from '../../services/apiClient';
-import type { Comment, CommentCreateResult, Notification, NotificationList } from '../../shared/types';
+import type { Comment, CommentCreateResult, Notification, NotificationList, ReminderRunResult } from '../../shared/types';
 
 export const commentController = {
   list: (taskId: string) => api.get<Comment[]>(`/api/tasks/${taskId}/comments`),
@@ -17,4 +17,6 @@ export const notificationController = {
   list: (unreadOnly = false) => api.get<NotificationList>('/api/notifications', { unread_only: unreadOnly }),
   markRead: (id: string) => api.patch<Notification>(`/api/notifications/${id}/read`),
   markAllRead: () => api.patch<NotificationList>('/api/notifications/read-all'),
+  /** UC-22: runs the deadline-reminder job now. */
+  runReminders: () => api.post<ReminderRunResult>('/api/notifications/reminders/run'),
 };

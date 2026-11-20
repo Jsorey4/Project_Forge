@@ -347,3 +347,36 @@ def test_phase2_required_indexes_exist(db_url):
     for name, columns in expected.items():
         assert name in defs, name
         assert columns in defs[name], defs[name]
+
+
+SAAQIB = "00000000-0000-4000-8000-000000000005"  # in Platform, not in Semester
+MYORAM = "00000000-0000-4000-8000-000000000006"  # in Platform, not in Semester
+
+
+def test_uc19_invitation_rules_hold_in_the_database_without_the_api(db_url):
+    insert = "insert into project_invitations (project_id, invitee_id, invited_by, role) values (%s, %s, %s, %s)"
+    with as_user(db_url, STAFF) as conn:  # a plain member of Semester
+        refused(conn, insert, (SEMESTER, SAAQIB, STAFF, "member"), "access denied")  # the trigger and the policy both refuse
+    with as_user(db_url, JON) as conn:  # manager of Semester (TYLER is its owner)
+        refused(conn, insert, (SEMESTER, SAAQIB, JON, "owner"), "only an owner")  # a manager cannot invite an owner
+        refused(conn, insert, (SEMESTER, SAAQIB, TYLER, "member"), "real sender")  # and cannot send in someone else's name
+        refused(conn, insert, (SEMESTER, STAFF, JON, "member"), "already a member")
+        conn.execute(insert, (SEMESTER, SAAQIB, JON, "member"))
+        refused(conn, insert, (SEMESTER, SAAQIB, JON, "manager"), "uq_project_invitations_one_pending")  # one open invitation each
+        assert scalar(conn, "select count(*) from project_invitations where project_id = %s", (SEMESTER,)) == 1
+        # The invitee sees exactly their own invitation, can decline it, but can never accept it by editing it.
+        conn.execute("select set_config('request.jwt.claim.sub', %s, false)", (SAAQIB,))
+        assert scalar(conn, "select count(*) from project_invitations") == 1
+        refused(conn, "update project_invitations set status = 'accepted' where invitee_id = %s", (SAAQIB,), "row-level security")
+        refused(conn, "update project_invitations set role = 'owner' where invitee_id = %s", (SAAQIB,), "")
+        refused(conn, "insert into project_members (project_id, user_id, role) values (%s, %s, 'member')", (SEMESTER, SAAQIB), "access denied")
+        assert conn.execute("update project_invitations set status = 'declined' where invitee_id = %s", (SAAQIB,)).rowcount == 1
+        refused(conn, "update project_invitations set status = 'pending' where invitee_id = %s", (SAAQIB,), "")  # answered once
+        # Someone who is neither the invitee nor a manager of that project sees nothing.
+        conn.execute("select set_config('request.jwt.claim.sub', %s, false)", (MYORAM,))
+        assert scalar(conn, "select count(*) from project_invitations") == 0
+        # The project's owner can see it and withdraw an open one.
+        conn.execute("select set_config('request.jwt.claim.sub', %s, false)", (TYLER,))
+        assert scalar(conn, "select count(*) from project_invitations") == 1
+    with as_user(db_url, None) as nobody:
+        assert scalar(nobody, "select count(*) from project_invitations") == 0

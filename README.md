@@ -23,6 +23,16 @@ npm run dev          # http://localhost:5173 (proxies /api and /ws to :8000)
 
 On first start the backend creates `backend/projectforge.db` and seeds the demo team. To run everything as one process, run `npm run build` in `web/`. `uvicorn app.main:app` then serves the built site at http://localhost:8000.
 
+### Reset and seed the database
+
+```bash
+cd backend
+python seed.py --reset   # SQLite demo DB only: drops every table, recreates and reseeds (refuses PostgreSQL)
+python seed.py           # adds only what is missing; safe to repeat, also works on PostgreSQL
+```
+
+Both commands print the account table below, the shared password and the 2FA code. On Windows use `.venv\Scripts\python.exe seed.py --reset`. The backend also seeds these accounts on first start, so the commands are only needed to get back to a known state (for example after accepting the demo invitation).
+
 ### Demo accounts
 
 All demo accounts use the password `ProjectForge!1`.
@@ -30,9 +40,22 @@ All demo accounts use the password `ProjectForge!1`.
 | Username | Role on "ProjectForge Platform" | Notes |
 |---|---|---|
 | `jon` | Owner | |
-| `tyler` | Manager | 2FA on. Demo code `123456` |
+| `tyler` | Manager | |
 | `staff` | Member | Owner of "Personal Portfolio Site" |
 | `preethi`, `saaqib`, `myoram`, `aashwat` | Member | |
+
+In demo mode **every** sign-in asks for a 6-digit code after the password step: use `123456` (the 2FA step has a "Fill it in" shortcut). Outside demo mode only accounts that turned 2FA on are asked (`REQUIRE_MFA` has no effect there).
+
+**Test accounts** (created by `seed.py`; password `ProjectForge!1`, 2FA code `123456`):
+
+| Email | Role | Where |
+|---|---|---|
+| `owner@projectforge.dev` | Owner | "Forge Launch Plan" (populated) and "Empty Sandbox" |
+| `manager@projectforge.dev` | Manager | both projects |
+| `member@projectforge.dev` | Member | "Forge Launch Plan", with assigned tasks and 7.25 logged hours |
+| `outsider@projectforge.dev` | none | in no project, to show cross-project denial and to receive invitations |
+
+"Forge Launch Plan" has 7 tasks, 5 soft deadlines, comments with mentions, a bid, a budget, three stage costs (total 13000.75) and five expenses. "Empty Sandbox" has no tasks, costs or hours, so exports say "nothing to export" and reports show N/A.
 
 When demo mode is on, the sidebar footer has a **Quick Demo Role Switcher** (Jon · Owner / Tyler · Manager / Staff · Member). The reset-password page also has a **demo inbox** that shows the reset and unlock emails the server would send.
 
@@ -45,12 +68,14 @@ When demo mode is on, the sidebar footer has a **Quick Demo Role Switcher** (Jon
 5. Open a task and post `**hi** <script>alert(1)</script> @staff @nobody`. The script is stripped, a warning appears for `@nobody`, and Staff gets a live toast. (UC-21, UC-22)
 6. On **Home** (dashboard), choose **Customize** and drag a widget onto another one. A red outline shows the overlap and the widget snaps back. Then use **Restore default**. (UC-16, UC-17)
 7. On **People**, try to demote the only owner. You get "Project must have at least one owner". (UC-20)
+8. As `owner@projectforge.dev`, open **People** for "Forge Launch Plan", choose **Invite member**, and enter `outsider@projectforge.dev`. Then sign in as `outsider@projectforge.dev`: the invitation appears on **Projects** and only **Accept** adds the person. (UC-19)
+9. As `member@projectforge.dev`, open **Notifications** and choose **Run deadline reminders**. A reminder is created once for the task due in six hours; running it again adds nothing. (UC-22)
 
 ## Configuration
 
 Copy `backend/.env.example` to `backend/.env`. With nothing set you get SQLite in demo mode. For Supabase:
 
-1. In the Supabase SQL editor, run `supabase/migrations/0001_initial_schema.sql`. It creates the tables, indexes, the soft-deadline trigger, and the RLS policies. You can then optionally run `supabase/seed.sql`.
+1. In the Supabase SQL editor, run the files in `supabase/migrations/` in order: `0001_initial_schema.sql` (tables, indexes, the soft-deadline trigger, RLS), `0002_security_hardening.sql`, then `0003_project_invitations.sql` (pending invitations and their RLS; safe to run twice). You can then optionally run `supabase/seed.sql`.
 2. Set `DATABASE_URL` to the Supabase connection string, then set `JWT_SECRET` (32+ characters), `DEMO_MODE=false` and `ENVIRONMENT=production` for a real deployment. With demo mode off, `FORCE_HTTPS` defaults to on: plain-HTTP requests are redirected to HTTPS and every response carries HSTS (SE-NFR-06). Behind a TLS-terminating proxy, start uvicorn with `--proxy-headers`.
 
 If Postgres is unreachable and `DB_FALLBACK_TO_SQLITE=true`, the backend logs a warning and falls back to SQLite.
@@ -58,9 +83,9 @@ If Postgres is unreachable and `DB_FALLBACK_TO_SQLITE=true`, the backend logs a 
 ## Tests
 
 ```bash
-cd backend && python -m pytest                     # 17 tests, UC-01..UC-22 and SE-NFR-01..12
-TEST_DATABASE_URL=postgresql://user@host/db python -m pytest   # same suite on PostgreSQL
-cd web && npm test                                 # 35 Vitest unit tests
+cd backend && python -m pytest                     # 46 passed on SQLite; the 10 RLS tests are skipped without a PostgreSQL URL
+TEST_DATABASE_URL=postgresql://user@host/db SUPABASE_TEST_DB_URL=postgresql://user@host/postgres python -m pytest   # 56 passed on PostgreSQL 16, none skipped
+cd web && npm test                                 # 55 Vitest unit tests
 cd web && npm run build                            # type-check + production build
 ```
 
@@ -129,9 +154,20 @@ The 12 NFRs below use the definitions in the team README (`Jsorey4/CS3354_Team3_
 Profile & settings has the mockup's **Notification preferences** and **Connections** cards. Both are stored on the user's own `user_profiles` row and saved as soon as a switch or button is used (`PUT /api/settings/profile`).
 
 - `notification_prefs` (`jsonb`): `task_assignments`, `mentions` and `deadline_reminders` default to on; `project_updates` defaults to off. The server checks these values before it creates a notification, so a muted kind is never stored or pushed. The mapping is: assignment and reassignment → task assignments; mention → mentions; deadline and soft-deadline reminders → deadline reminders; status changes on a task you own or created → project updates (a new `project_update` notification kind). Role and membership changes are always sent, because UC-19 and UC-20 require telling the member (SE-FR-29, UC-22).
-- `connected_accounts` (`jsonb`): `{google_calendar | outlook | google_sheets: {connected, connected_at}}`. Connecting records the user's consent for one-way exports, so the export dialog skips its permission prompt for a connected provider. No OAuth tokens are stored, and nothing is imported (SE-FR-19, SE-FR-20, UC-14, UC-15).
+- `connected_accounts` (`jsonb`): `{google_calendar | outlook | google_sheets: {connected, connected_at}}`. Connecting only records that the user chose a provider. The export dialog still asks for consent every time for Google and Outlook (UC-14), so this flag never skips the prompt. No OAuth tokens are stored, and nothing is imported (SE-FR-19, SE-FR-20, UC-14, UC-15).
 - Updates are partial: only the switches named in the request change. Unknown switch names and non-boolean values return 422.
 - A task's final due date is required on create and cannot be cleared on edit (UC-18: "Validate required fields (title and due date)"). The form and the API both report `Due date is required`, and `tasks.due_date` is `not null`.
+
+## Behavior notes for the 20 end-to-end use cases
+
+- **Sign-up (UC-08)** does not log the person in. It confirms "Account created", redirects to Log In and prefills the email. Sign-up and log-in share the 5 requests per 60 seconds per IP limit and answer 429 "Try again later" with `Retry-After`.
+- **Invitations (UC-19)** are pending until the invitee accepts. `POST /api/projects/{id}/members/invite` stores an invitation (409 for a member or an open invitation, 403 for a non-owner inviting an owner). The invitee lists their own with `GET /api/invitations` and answers with `/accept` or `/decline`. Accepting re-checks that the sender is still an owner or manager; a stale invitation is cancelled (409). Owners and managers can cancel one while it is pending.
+- **Change role (UC-20):** authorization is checked before the last-owner rule, so a manager who targets the owner role gets 403 and learns nothing about the owner count. Only an owner who would demote the last owner gets 400.
+- **Deadline reminders (UC-22)** are created by a job, not by opening a page. The server runs it every `REMINDER_INTERVAL_SECONDS` (default 300; `0` turns the timer off). `POST /api/notifications/reminders/run` runs it on demand: for everyone in demo mode, for the caller only otherwise. Each reminder is created once.
+- **Calendar and spreadsheet export (UC-14, UC-15):** `.ics` and `.xlsx` are real files, scoped to what the caller may see. Google and Outlook ask for consent first; declining sends `oauth_consent=false` and the server shares nothing. **The Google/Microsoft OAuth token exchange is not built.** Without `GOOGLE_OAUTH_*` / `MICROSOFT_OAUTH_*` set, those targets answer 503 "not set up on this server" with Retry and Cancel; with them set they return only add-to-calendar links. Google Sheets answers 503 (unconfigured) or 501 (configured but not built); it never returns a fake link.
+- **Dashboard (UC-16):** hidden widgets stay in a "Hidden widgets" strip and can be shown again. A refused action ("Widget unavailable", "Invalid action") re-reads the layout so a stale screen recovers. The Cost summary widget shows figures only for projects the user owns or manages.
+- **Feature lists (UC-18):** owners and managers create, rename and delete lists on the Tasks screen; deleting a list keeps its tasks. Members tick their own tasks as done with the round checkbox.
+- **SQLite schema version** is checked at start. A demo database from an older build is copied to `projectforge.db.bak-vN` and rebuilt.
 
 ## Deviations from the requested file tree
 
@@ -154,3 +190,4 @@ Intentional differences from the mockups:
 
 - **Backend technology:** the team README says "Supabase only" with no second backend. This build has a FastAPI backend (as requested) on top of the Supabase-compatible schema and RLS policies. The team should decide whether to keep FastAPI or move the routers into Edge Functions / RLS.
 - **UC-10:** who unlocks an account is an open decision; this build unlocks with an emailed, signed, single-use token.
+- **OAuth export targets:** Google Calendar, Outlook and Google Sheets are not connected. The consent flow, scoping and honest errors exist, but creating events or sheets needs an OAuth token exchange that has not been built.

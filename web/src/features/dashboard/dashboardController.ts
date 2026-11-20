@@ -13,6 +13,8 @@ export const dashboardController = {
     api.post<DashboardPayload>('/api/dashboard/widgets', { widget_type: widgetType, grid_x: gridX, grid_y: gridY }),
   remove: (id: string) => api.del<DashboardPayload>(`/api/dashboard/widgets/${id}`),
   hide: (id: string) => api.patch<DashboardPayload>(`/api/dashboard/widgets/${id}/hide`),
+  /** Un-hide: the widget returns with its own size and settings. */
+  show: (id: string) => api.patch<DashboardPayload>(`/api/dashboard/widgets/${id}/show`),
   restoreDefault: () => api.post<DashboardPayload>('/api/dashboard/widgets/restore-default'),
   move: (id: string, gridX: number, gridY: number) =>
     api.put<Widget>(`/api/dashboard/widgets/${id}/position`, { grid_x: gridX, grid_y: gridY }),

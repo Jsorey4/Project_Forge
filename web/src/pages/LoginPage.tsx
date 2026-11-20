@@ -3,7 +3,8 @@
  * @description Sign-in screen. Step 1: email/username and password, with clear messages for wrong details,
  *   a locked account (with how to unlock) and too many attempts. Step 2 (when 2FA is on): the 6-digit code,
  *   shown inline in the same card. Opening an unlock link from the lockout email unlocks the account right
- *   here. Demo mode lists the seeded accounts and the demo code below the card.
+ *   here. After sign-up the person lands here with a confirmation and their email filled in. Demo mode lists
+ *   the seeded accounts and the demo code below the card, and the 2FA step can fill the demo code.
  * @traces SE-FR-11, SE-NFR-06, UC-09, UC-10
  */
 import { useEffect, useState, type FormEvent } from 'react';
@@ -21,14 +22,15 @@ export function LoginPage() {
   const [params, setParams] = useSearchParams();
   const navigate = useNavigate();
   const location = useLocation();
-  const from = (location.state as { from?: string } | null)?.from ?? '/dashboard';
-  const [email, setEmail] = useState('');
+  const state = location.state as { from?: string; notice?: string; email?: string } | null;
+  const from = state?.from ?? '/dashboard';
+  const [email, setEmail] = useState(state?.email ?? '');
   const [password, setPassword] = useState('');
   const [show, setShow] = useState(false);
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<{ tone: 'danger' | 'warn'; title: string; text?: string } | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(state?.notice ?? null);
 
   useEffect(() => {
     const token = params.get('unlock_token');
@@ -93,10 +95,18 @@ export function LoginPage() {
   const demoPanel = demoMode ? (
     <div className="rounded-card border border-dashed border-warn/50 bg-surface-2 p-4 text-sm">
       <p className="font-semibold text-ink">Demo accounts</p>
-      <p className="mt-1 text-body">Password for all: <span className="font-mono text-ink">ProjectForge!1</span> · 2FA demo code <span className="font-mono text-ink">123456</span></p>
+      <p className="mt-1 text-body">Password for all: <span className="font-mono text-ink">ProjectForge!1</span> · every log-in asks for a 2FA code: use <span className="font-mono text-ink">123456</span></p>
       {!pendingMfa ? (
         <div className="mt-3 flex flex-wrap gap-2">
-          {[['jon', 'Jon · Owner'], ['tyler', 'Tyler · Manager (2FA)'], ['staff', 'Staff · Member']].map(([u, label]) => (
+          {[
+            ['owner@projectforge.dev', 'Owner'],
+            ['manager@projectforge.dev', 'Manager'],
+            ['member@projectforge.dev', 'Member'],
+            ['outsider@projectforge.dev', 'Outsider (no project)'],
+            ['jon', 'Jon · Owner'],
+            ['tyler', 'Tyler · Manager'],
+            ['staff', 'Staff · Member'],
+          ].map(([u, label]) => (
             <button key={u} type="button" className="btn-secondary btn-sm" onClick={() => { setEmail(u); setPassword('ProjectForge!1'); }}>
               {label}
             </button>
@@ -113,6 +123,12 @@ export function LoginPage() {
         <form className="flex flex-col gap-5" onSubmit={submitCode}>
           {error ? <Alert tone={error.tone} title={error.title}>{error.text}</Alert> : null}
           <MfaCodeInput value={code} onChange={setCode} disabled={busy} />
+          {demoMode ? (
+            <p className="-mt-2 text-center text-sm text-muted">
+              Demo mode: the code is <span className="font-mono font-semibold text-ink">123456</span>{' '}
+              <button type="button" className="font-semibold text-accent" onClick={() => setCode('123456')}>Fill it in</button>
+            </p>
+          ) : null}
           <button type="submit" className={AUTH_BUTTON} disabled={busy || code.length !== 6}>
             <Icon name="shield" /> {busy ? 'Verifying…' : 'Verify and log in'}
           </button>

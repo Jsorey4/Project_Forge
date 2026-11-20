@@ -1,8 +1,9 @@
 /**
  * @author Saaqib Shaik
  * @description The "New project" form. Requires a name, status, type (defaulting to the user's preferred
- *   mode) and a future deadline, and accepts any number of member usernames. If the server reports unknown
- *   usernames, they are listed with a one-click "remove" so the creator can fix the list and resubmit.
+ *   mode) and a future deadline, and accepts any number of members, each a username or an email address. If
+ *   the server reports people it cannot find, they are listed with a one-click "remove" so the creator can fix
+ *   the list and resubmit; everything else the creator typed is kept.
  * @traces SE-FR-16, SE-NFR-09, UC-12
  */
 import { useEffect, useState } from 'react';
@@ -93,12 +94,12 @@ export function CreateProjectModal({ open, defaultType, onClose, onCreated }: Pr
         <RetryBanner error={save.networkError} onRetry={save.retry} onCancel={save.cancel} busy={save.saving} />
         {save.error && unknown.length === 0 && !Object.keys(save.fieldErrors).length ? <Alert>{save.error.detail}</Alert> : null}
         {unknown.length > 0 ? (
-          <Alert tone="warn" title="Some usernames were not found">
-            <p>Remove them, or ask them to sign up first and then invite them from the People page.</p>
+          <Alert tone="warn" title="Some people were not found">
+            <p>Remove them, or ask them to sign up first and then invite them from the People page once the project exists.</p>
             <div className="mt-2 flex flex-wrap gap-2">
               {unknown.map((u) => (
                 <button key={u} type="button" onClick={() => removeUnknown(u)} className="inline-flex items-center gap-1 rounded-full border border-warn/40 bg-surface px-2 py-0.5 text-xs font-semibold">
-                  @{u} <Icon name="x" className="h-3 w-3" />
+                  {u.includes('@') ? u : `@${u}`} <Icon name="x" className="h-3 w-3" />
                 </button>
               ))}
             </div>
@@ -132,14 +133,14 @@ export function CreateProjectModal({ open, defaultType, onClose, onCreated }: Pr
             <input id="p-deadline" type="datetime-local" className="input" value={deadline} onChange={(e) => setDeadline(e.target.value)} />
           </Field>
         </div>
-        <Field label="Members (usernames)" error={errors.members} hint="Separate with commas or spaces. You are added as the owner automatically." htmlFor="p-members">
-          <textarea id="p-members" className="input min-h-[64px] font-mono text-xs" value={memberText} onChange={(e) => setMemberText(e.target.value)} placeholder="tyler, staff, preethi" />
+        <Field label="Members (usernames or emails)" error={errors.members} hint="Separate with commas or spaces. You are added as the owner automatically." htmlFor="p-members">
+          <textarea id="p-members" className="input min-h-[64px] font-mono text-xs" value={memberText} onChange={(e) => setMemberText(e.target.value)} placeholder="tyler, staff, preethi@example.com" />
         </Field>
         {members.length > 0 ? (
           <div className="flex flex-wrap gap-1.5">
             {members.map((m) => (
               <Badge key={m} tone={unknown.includes(m) ? 'danger' : 'neutral'} icon={unknown.includes(m) ? 'alert' : 'users'}>
-                @{m}
+                {m.includes('@') ? m : `@${m}`}
               </Badge>
             ))}
             <span className="text-xs text-muted">{members.length} member{members.length === 1 ? '' : 's'}</span>

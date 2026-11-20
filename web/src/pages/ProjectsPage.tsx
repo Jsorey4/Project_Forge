@@ -3,7 +3,8 @@
  * @description All of the user's projects as color-coded cards with All / School / Personal / Work filter
  *   tabs and a New project button. Selecting a card shows that project below as a To-do / In progress /
  *   Completed board with member avatars, like the mockup. Card color and order (drag to reorder) are saved
- *   per user; completion bars update live.
+ *   per user; completion bars update live. Pending project invitations appear on top with Accept / Decline,
+ *   even for someone who is not in any project yet.
  * @traces SE-FR-16, SE-FR-17, SE-FR-18, SE-NFR-09, SE-NFR-10, UC-12, UC-13
  */
 import { useEffect, useMemo, useState, type DragEvent } from 'react';
@@ -11,6 +12,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../features/auth/AuthProvider';
 import { CreateProjectModal } from '../features/projects/CreateProjectModal';
 import { PROJECT_TYPES } from '../features/projects/model';
+import { PendingInvitations } from '../features/members/PendingInvitations';
 import { ProjectCard } from '../features/projects/ProjectCard';
 import { projectController } from '../features/projects/projectController';
 import { useProjectScope } from '../features/projects/ProjectScope';
@@ -91,6 +93,12 @@ export function ProjectsPage() {
         title="Projects"
         subtitle={<><b>{active}</b> active · {projects.length} total</>}
         actions={<button type="button" className="btn-primary" onClick={() => setCreating(true)}><Icon name="plus" /> New project</button>}
+      />
+      <PendingInvitations
+        onAccepted={async (inv) => {
+          await refresh();
+          setCurrentProjectId(inv.project_id);
+        }}
       />
       <div className="-mt-4 mb-6">
         <Segmented ariaLabel="Project mode" value={type} onChange={setType} options={[{ value: 'all', label: 'All' }, ...PROJECT_TYPES.map((t) => ({ value: t.value, label: t.label }))]} />

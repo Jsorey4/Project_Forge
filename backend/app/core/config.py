@@ -104,6 +104,27 @@ class Settings:
     frontend_url: str = "http://localhost:5173"
     frontend_dist: Path = PROJECT_ROOT / "web" / "dist"
     force_https: bool = False
+    # UC-09: every sign-in has a second step (the 6-digit code). Applies in demo mode, where the code is
+    # the visible demo code; outside demo mode 2FA stays per-account (an account without an authenticator
+    # secret could not complete a mandatory second step).
+    require_mfa: bool = True
+    # UC-22: how often the deadline-reminder job runs (seconds). 0 turns the background job off; the
+    # manual trigger endpoint still works.
+    reminder_interval_seconds: int = 300
+    # UC-14 / UC-15: Google and Microsoft OAuth application credentials. Without them calendar / sheet
+    # exports to those providers refuse with a clear "not configured" error instead of pretending.
+    google_oauth_client_id: str = ""
+    google_oauth_client_secret: str = ""
+    microsoft_oauth_client_id: str = ""
+    microsoft_oauth_client_secret: str = ""
+
+    @property
+    def google_oauth_configured(self) -> bool:
+        return bool(self.google_oauth_client_id and self.google_oauth_client_secret)
+
+    @property
+    def microsoft_oauth_configured(self) -> bool:
+        return bool(self.microsoft_oauth_client_id and self.microsoft_oauth_client_secret)
 
     @property
     def is_sqlite(self) -> bool:
@@ -149,4 +170,10 @@ def get_settings() -> Settings:
         frontend_dist=Path(os.getenv("FRONTEND_DIST", str(PROJECT_ROOT / "web" / "dist"))),
         # SE-NFR-06: HTTPS redirect + HSTS. On by default whenever demo mode is off.
         force_https=_bool("FORCE_HTTPS", not demo_mode),
+        require_mfa=_bool("REQUIRE_MFA", True),
+        reminder_interval_seconds=max(0, _int("REMINDER_INTERVAL_SECONDS", 300)),
+        google_oauth_client_id=os.getenv("GOOGLE_OAUTH_CLIENT_ID", "").strip(),
+        google_oauth_client_secret=os.getenv("GOOGLE_OAUTH_CLIENT_SECRET", "").strip(),
+        microsoft_oauth_client_id=os.getenv("MICROSOFT_OAUTH_CLIENT_ID", "").strip(),
+        microsoft_oauth_client_secret=os.getenv("MICROSOFT_OAUTH_CLIENT_SECRET", "").strip(),
     )

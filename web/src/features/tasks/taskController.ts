@@ -5,7 +5,7 @@
  * @traces SE-FR-26, SE-FR-27, UC-18
  */
 import { api } from '../../services/apiClient';
-import type { Task, TaskDetail, TaskInput, TaskStatus } from '../../shared/types';
+import type { Task, TaskDetail, TaskInput, TaskList, TaskStatus } from '../../shared/types';
 
 export const taskController = {
   list: (projectId: string, filters: { status?: string; list_id?: string; assignee_id?: string; tag?: string; search?: string } = {}) =>
@@ -19,4 +19,8 @@ export const taskController = {
     api.patch<Task[]>(`/api/tasks/${taskId}/move`, listId === undefined ? { position, status } : { position, status, list_id: listId }),
   remove: (taskId: string) => api.del<void>(`/api/tasks/${taskId}`),
   tags: (projectId: string) => api.get<string[]>(`/api/projects/${projectId}/tags`),
+  /** Feature lists (TaskList): owners and managers create, rename and delete them. */
+  createList: (projectId: string, name: string) => api.post<TaskList>(`/api/projects/${projectId}/lists`, { name }),
+  renameList: (listId: string, name: string) => api.put<TaskList>(`/api/lists/${listId}`, { name }),
+  deleteList: (listId: string) => api.del<void>(`/api/lists/${listId}`),
 };

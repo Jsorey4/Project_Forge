@@ -6,7 +6,7 @@
     app call the API from another port (CORS), refuses request bodies over 1 MB, makes retried saves safe
     (the same Idempotency-Key and body never save twice), formats validation errors as
     {"detail", "errors": {field: message}}, answers malformed ids with 404 instead of crashing, plugs in
-    every feature router, hosts the WebSocket used for live progress and notification updates (signed-in
+    every feature router, runs the deadline-reminder job on a timer, hosts the WebSocket used for live progress and notification updates (signed-in
     users only), and - after `npm run build` - also serves the website itself.
 @traces: SE-NFR-04, SE-NFR-06, SE-NFR-08, SE-NFR-10, SE-NFR-11, SE-NFR-12, UC-08, UC-09
 """
@@ -22,6 +22,7 @@ from collections import OrderedDict
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, status
+from fastapi.concurrency import run_in_threadpool
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.httpsredirect import HTTPSRedirectMiddleware
@@ -55,17 +56,47 @@ logger = logging.getLogger("projectforge")
 settings = get_settings()
 
 
+def _reminder_pass() -> int:
+    """One run of the UC-22 deadline-reminder job in its own database session; returns reminders created."""
+    from app.routers.collaboration import publish_notifications, run_deadline_reminders
+
+    with SessionLocal() as db:
+        _checked, created = run_deadline_reminders(db)
+        publish_notifications(created)
+        return len(created)
+
+
+async def _reminder_loop(interval_seconds: int) -> None:
+    """UC-22: runs the reminder job now and then every `interval_seconds` until the server stops."""
+    while True:
+        try:
+            created = await run_in_threadpool(_reminder_pass)
+            if created:
+                logger.info("Deadline reminder job created %s reminder(s).", created)
+        except Exception:  # a failed pass must never stop the schedule
+            logger.exception("Deadline reminder job failed; it will try again on the next run.")
+        await asyncio.sleep(interval_seconds)
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     create_all()
     if settings.seed_demo_data:
-        from app.seed import seed_demo_data
+        from app.seed import seed_demo_data, seed_test_accounts
 
         with SessionLocal() as db:
             seed_demo_data(db)
+            seed_test_accounts(db)
     hub.bind_loop(asyncio.get_running_loop())
+    reminder_task = None
+    if settings.reminder_interval_seconds > 0:
+        reminder_task = asyncio.create_task(_reminder_loop(settings.reminder_interval_seconds))
     logger.info("ProjectForge API ready (database: %s, demo mode: %s)", database_kind(), settings.demo_mode)
-    yield
+    try:
+        yield
+    finally:
+        if reminder_task is not None:
+            reminder_task.cancel()
 
 
 app = FastAPI(
@@ -339,6 +370,7 @@ for module in (
     reports,
 ):
     app.include_router(module.router)
+app.include_router(members.invitations_router)
 
 
 @app.get("/api/health", tags=["meta"])

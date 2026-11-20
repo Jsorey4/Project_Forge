@@ -1,14 +1,16 @@
 /**
  * @author Aashwat Singh - matches notifications.html
- * @description Every notification for the signed-in user - @mentions, assignments, role and member changes,
- *   and automatic deadline / soft-deadline reminders - newest first in one card: purple dot when unread, the
+ * @description Every notification for the signed-in user - @mentions, assignments, invitations, role and member
+ *   changes, and deadline / soft-deadline reminders - newest first in one card: purple dot when unread, the
  *   message, a type pill, and the time. All / Unread filter, mark-as-read on open or with the per-row button,
- *   and "Mark all read". New notifications arrive live over the WebSocket (and pop up as a toast).
+ *   and "Mark all read". New notifications arrive live over the WebSocket (and pop up as a toast). "Run
+ *   deadline reminders" starts the server's reminder job on demand so it can be shown without waiting.
  * @traces SE-FR-29, SE-NFR-11, SE-NFR-12, UC-22
  */
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { notificationController } from '../features/collaboration/commentController';
+import { reminderSummary } from '../features/collaboration/reminders';
 import { useRealtime } from '../services/realtimeClient';
 import type { Notification } from '../shared/types';
 import { formatDateTime, relativeTime } from '../shared/format';
@@ -26,6 +28,8 @@ const KIND: Record<string, { tone: Tone; label: string }> = {
   member_removed: { tone: 'danger', label: 'Removed' },
   task_reassigned: { tone: 'brand', label: 'Update' },
   project_update: { tone: 'info', label: 'Update' },
+  invitation: { tone: 'accent', label: 'Invitation' },
+  invitation_response: { tone: 'info', label: 'Invitation' },
   system: { tone: 'neutral', label: 'ProjectForge' },
 };
 
@@ -35,6 +39,8 @@ export function NotificationsPage() {
   const [items, setItems] = useState<Notification[] | null>(null);
   const [unread, setUnread] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [running, setRunning] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -68,6 +74,21 @@ export function NotificationsPage() {
     if (n.link) navigate(n.link);
   };
 
+  const runReminders = async () => {
+    setError(null);
+    setNotice(null);
+    setRunning(true);
+    try {
+      const result = await notificationController.runReminders();
+      setNotice(reminderSummary(result));
+      await load();
+    } catch (err) {
+      setError(toApiError(err).detail);
+    } finally {
+      setRunning(false);
+    }
+  };
+
   const markAll = async () => {
     try {
       const result = await notificationController.markAllRead();
@@ -86,11 +107,15 @@ export function NotificationsPage() {
         actions={
           <>
             <Segmented ariaLabel="Notification filter" value={tab} onChange={setTab} options={[{ value: 'all', label: 'All' }, { value: 'unread', label: 'Unread' }]} />
+            <button type="button" className="btn-secondary" onClick={() => void runReminders()} disabled={running} title="Runs the same job the server runs on a timer: creates a reminder for every task and soft deadline due in the next 24 hours">
+              <Icon name="refresh" /> {running ? 'Running…' : 'Run deadline reminders'}
+            </button>
             <button type="button" className="btn-secondary" onClick={() => void markAll()} disabled={unread === 0}>Mark all read</button>
           </>
         }
       />
       {error ? <div className="mb-4"><Alert onClose={() => setError(null)}>{error}</Alert></div> : null}
+      {notice ? <div className="mb-4"><Alert tone="ok" onClose={() => setNotice(null)}>{notice}</Alert></div> : null}
       <div className="card px-6">
         {items === null ? <Spinner /> : items.length === 0 ? (
           <EmptyState icon="bell" title={tab === 'unread' ? 'No unread notifications' : 'No notifications yet'}>Mentions, assignments and deadline reminders show up here.</EmptyState>

@@ -4,7 +4,11 @@
     seven teammates (Jon = Owner, Tyler = Manager with 2FA on, "staff" = Member, plus the rest of the team),
     three projects, feature lists, tasks with tags and hours, soft deadlines, comments with @mentions,
     bids / budgets / stage costs / expenses, time entries and notifications. Dates are relative to "now"
-    so deadlines are always upcoming. It does nothing if any user already exists.
+    so deadlines are always upcoming. seed_demo_data() does nothing if any user already exists.
+    seed_test_accounts() adds four documented sign-ins for manual testing (owner@, manager@, member@ and
+    outsider@projectforge.dev, all with 2FA and the demo password) with a populated project ("Forge
+    Launch Plan") and an empty one ("Empty Sandbox"); it can be run any number of times and only adds
+    what is missing.
 @traces: UC-01..UC-22 (demo data), SE-FR-01..SE-FR-30
 """
 
@@ -335,3 +339,196 @@ def seed_demo_data(db: Session) -> bool:
     db.commit()
     logger.info("Seeded demo data: %d users, 3 projects. Demo password: %s", len(users), "(DEMO_PASSWORD)")
     return True
+
+
+# ----------------------------------------------------------------------------------------------------
+# Four documented accounts for manual testing of every use case (see backend/seed.py and the README).
+# ----------------------------------------------------------------------------------------------------
+TEST_ACCOUNTS = [
+    # username, email, display name, what they are for
+    ("owner", "owner@projectforge.dev", "Project Owner", "Owner of both projects"),
+    ("manager", "manager@projectforge.dev", "Project Manager", "Manager in both projects"),
+    ("member", "member@projectforge.dev", "Regular Member", "Member of Forge Launch Plan with assigned tasks"),
+    ("outsider", "outsider@projectforge.dev", "Outside User", "Signed up but in NO project (cross-project denial)"),
+]
+POPULATED_PROJECT = "Forge Launch Plan"
+EMPTY_PROJECT = "Empty Sandbox"
+
+
+def seed_test_accounts(db: Session) -> dict[str, int]:
+    """Adds the four test accounts and their two projects when they are missing. Safe to run repeatedly."""
+    settings = get_settings()
+    now = utcnow()
+    added = {"users": 0, "projects": 0}
+    password_hash = hash_password(settings.demo_password)
+
+    users: dict[str, UserProfile] = {}
+    for username, email, display, _purpose in TEST_ACCOUNTS:
+        existing = db.execute(select(UserProfile).where(func.lower(UserProfile.email) == email)).scalar_one_or_none()
+        if existing is None:
+            existing = UserProfile(
+                username=username,
+                email=email,
+                display_name=display,
+                password_hash=password_hash,
+                mfa_enabled=True,  # UC-09: the second step applies; in demo mode the code is DEMO_MFA_CODE
+                mfa_secret=generate_mfa_secret(),
+                theme="dark",
+                color_blind_mode="none",
+                default_project_type="work",
+                created_at=now - timedelta(days=30),
+            )
+            db.add(existing)
+            added["users"] += 1
+        users[username] = existing
+    db.flush()
+    u = {k: v.id for k, v in users.items()}
+
+    def project_exists(name: str) -> bool:
+        return db.execute(select(Project.id).where(Project.name == name, Project.created_by == u["owner"])).first() is not None
+
+    def add_member(project: Project, username: str, role: str, color: str, order: int) -> None:
+        db.add(ProjectMember(project_id=project.id, user_id=u[username], role=role, card_color=color, card_order=order, joined_at=project.created_at))
+
+    def add_lists(project: Project, names: list[str]) -> dict[str, TaskList]:
+        out = {}
+        for i, name in enumerate(names):
+            lst = TaskList(project_id=project.id, name=name, position=i, created_at=project.created_at)
+            db.add(lst)
+            out[name] = lst
+        db.flush()
+        return out
+
+    # ------------------------------------------------------------------ populated project
+    if not project_exists(POPULATED_PROJECT):
+        launch = Project(
+            name=POPULATED_PROJECT,
+            description="Everything needed to ship ProjectForge v1: schema, login, CI and the launch checklist.",
+            status="active",
+            project_type="work",
+            deadline=_day(now, 30),
+            created_by=u["owner"],
+            created_at=now - timedelta(days=20),
+        )
+        db.add(launch)
+        db.flush()
+        add_member(launch, "owner", "owner", "#6366F1", 0)
+        add_member(launch, "manager", "manager", "#6366F1", 0)
+        add_member(launch, "member", "member", "#6366F1", 0)
+        lists = add_lists(launch, ["Planning", "Build", "Launch"])
+        positions: dict[str, int] = {}
+
+        def task(title, list_name, status, assignee, due, priority="medium", tags=(), est=None, assigned=None, desc="") -> Task:
+            pos = positions.get(status, 0)
+            positions[status] = pos + 1
+            t = Task(
+                project_id=launch.id,
+                list_id=lists[list_name].id,
+                title=title,
+                description=desc,
+                status=status,
+                priority=priority,
+                assignee_id=u[assignee] if assignee else None,
+                due_date=due,
+                position=pos,
+                tags=list(tags),
+                estimated_hours=Decimal(str(est)) if est is not None else None,
+                assigned_hours=Decimal(str(assigned)) if assigned is not None else None,
+                completed_at=now - timedelta(days=4) if status == "done" else None,
+                created_by=u["manager"],
+                created_at=now - timedelta(days=15),
+            )
+            db.add(t)
+            db.flush()
+            return t
+
+        t_charter = task("Write the project charter", "Planning", "done", "manager", now - timedelta(days=3), "high", ["docs"], 4, 4)
+        t_schema = task("Design the database schema", "Build", "in_progress", "member", now + timedelta(days=4), "high", ["database"], 10, 12,
+                        "Tables for users, projects, tasks and **costs**. Keep money as exact decimals.")
+        t_login = task("Implement the login flow", "Build", "todo", "member", now + timedelta(hours=6), "urgent", ["auth"], 6, 6)
+        t_ci = task("Set up the CI pipeline", "Build", "review", "manager", _day(now, 9), "medium", ["devops"], 5, 5)
+        t_flaky = task("Fix the flaky export test", "Build", "in_progress", "member", now - timedelta(days=1), "high", ["tests"], 3, 3)
+        t_review = task("Run the cost review meeting", "Planning", "todo", "owner", _day(now, 2), "medium", ["finance"], 2, 2)
+        t_check = task("Prepare the launch checklist", "Launch", "todo", None, _day(now, 20), "low", ["launch"])
+        t_check.tags = ["launch", "docs"]
+
+        def soft(t: Task, title: str, due: datetime, priority: str, done: bool = False) -> None:
+            db.add(SoftDeadline(task_id=t.id, project_id=launch.id, title=title, due_at=due, priority=priority, is_completed=done,
+                                completed_at=now - timedelta(days=1) if done else None, created_by=t.assignee_id or u["manager"], created_at=now - timedelta(days=5)))
+
+        soft(t_schema, "Draft the schema", t_schema.due_date - timedelta(days=3), "high", done=True)
+        soft(t_schema, "Review with the manager", t_schema.due_date - timedelta(days=1), "medium")
+        soft(t_login, "Login form working", now + timedelta(hours=3), "high")
+        soft(t_ci, "Pipeline runs on pull requests", t_ci.due_date - timedelta(days=4), "low")
+        soft(t_review, "Collect the expense report", t_review.due_date - timedelta(hours=12), "medium")
+
+        def comment(t: Task, who: str, body: str, minutes_ago: int) -> None:
+            db.add(Comment(task_id=t.id, project_id=launch.id, author_id=u[who], body=body, created_at=now - timedelta(minutes=minutes_ago)))
+
+        comment(t_schema, "manager", "Nice start. @member please keep **money as exact decimals**, no floats.", 180)
+        comment(t_schema, "member", "Will do. I added `NUMERIC(12,2)` for every amount.", 120)
+        comment(t_login, "owner", "This one is due today - shout if you are blocked. @member @manager", 45)
+
+        db.add(ProjectFinancials(project_id=launch.id, bid_amount=Decimal("25000.00"), budget_amount=Decimal("20000.00"), currency="USD", updated_by=u["owner"]))
+        stage_rows = []
+        for i, (name, amount) in enumerate([("Planning", "2500.00"), ("Build", "9000.50"), ("Launch", "1500.25")]):
+            row = StageCost(project_id=launch.id, stage_name=name, amount=Decimal(amount), position=i, notes="")
+            db.add(row)
+            stage_rows.append(row)
+        db.flush()
+        today = now.date()
+        for category, desc, amount, days_ago, stage in [
+            ("software", "Hosting plan (1 month)", "29.99", 14, 1),
+            ("labor", "Contract designer - week 1", "850.00", 12, 0),
+            ("equipment", "Test phone", "199.00", 9, 1),
+            ("services", "Domain and certificate", "34.50", 7, 2),
+            ("travel", "Customer demo trip", "312.40", 4, None),
+        ]:
+            db.add(Expense(project_id=launch.id, stage_cost_id=stage_rows[stage].id if stage is not None else None, category=category,
+                           description=desc, amount=Decimal(amount), expense_date=today - timedelta(days=days_ago), created_by=u["owner"]))
+
+        def log(t: Task, who: str, days_ago: int, hours: str, note: str = "") -> None:
+            start = datetime.combine(today - timedelta(days=days_ago), datetime.min.time()) + timedelta(hours=14)
+            h = Decimal(hours)
+            db.add(TimeEntry(project_id=launch.id, task_id=t.id, user_id=u[who], source="timer" if days_ago % 2 == 0 else "manual",
+                             started_at=start, ended_at=start + timedelta(seconds=int(h * 3600)), paused_seconds=0, duration_hours=h, note=note))
+
+        log(t_charter, "manager", 8, "3.50")
+        log(t_charter, "manager", 7, "1.25")
+        log(t_schema, "member", 3, "3.50", "ER diagram")
+        log(t_schema, "member", 2, "2.25", "Migrations")
+        log(t_schema, "member", 1, "1.50")
+        log(t_ci, "manager", 2, "4.00")
+        log(t_review, "owner", 1, "1.00")
+
+        for who, kind, message, link, minutes_ago, t in [
+            ("member", "assignment", "Project Manager assigned you “Design the database schema”", f"/tasks/{t_schema.id}", 1400, t_schema),
+            ("member", "mention", "Project Manager mentioned you on “Design the database schema”", f"/tasks/{t_schema.id}", 180, t_schema),
+            ("member", "mention", "Project Owner mentioned you on “Implement the login flow”", f"/tasks/{t_login.id}", 45, t_login),
+            ("manager", "mention", "Project Owner mentioned you on “Implement the login flow”", f"/tasks/{t_login.id}", 45, t_login),
+        ]:
+            db.add(Notification(user_id=u[who], kind=kind, message=message, link=link, project_id=launch.id, task_id=t.id, created_at=now - timedelta(minutes=minutes_ago)))
+        added["projects"] += 1
+
+    # ------------------------------------------------------------------ empty project
+    if not project_exists(EMPTY_PROJECT):
+        sandbox = Project(
+            name=EMPTY_PROJECT,
+            description="A project with no tasks, costs or hours: use it to see \"Nothing to export\" and empty reports.",
+            status="planning",
+            project_type="personal",
+            deadline=_day(now, 60),
+            created_by=u["owner"],
+            created_at=now - timedelta(days=2),
+        )
+        db.add(sandbox)
+        db.flush()
+        add_member(sandbox, "owner", "owner", "#10B981", 1)
+        add_member(sandbox, "manager", "manager", "#10B981", 1)
+        add_lists(sandbox, ["Planning", "Development", "Testing"])
+        added["projects"] += 1
+
+    db.commit()
+    if added["users"] or added["projects"]:
+        logger.info("Seeded test accounts: %d new user(s), %d new project(s).", added["users"], added["projects"])
+    return added

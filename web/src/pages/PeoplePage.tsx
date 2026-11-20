@@ -2,7 +2,8 @@
  * @author Aashwat Singh - matches people.html
  * @description The project's team directory as person cards: tinted initials avatar, name, Owner / Manager /
  *   Member role badge, the project and their task count, and an "x of y done" progress bar. Owners and
- *   managers can add members (invite modal), change roles (never leaving the project without an owner) and
+ *   managers can invite people (a pending invitation they can cancel until it is accepted), change roles
+ *   (never leaving the project without an owner) and
  *   remove members while reassigning their open tasks; anyone can leave a project. Changes apply on the
  *   next request because the server re-checks membership every time.
  * @traces SE-FR-30, SE-NFR-09, SE-NFR-11, UC-19, UC-20
@@ -17,8 +18,8 @@ import { memberController } from '../features/members/memberController';
 import { ProjectPicker, useProjectScope } from '../features/projects/ProjectScope';
 import { useRealtime } from '../services/realtimeClient';
 import { isManager } from '../shared/permissions';
-import type { Member, Role } from '../shared/types';
-import { Alert, Avatar, EmptyState, Icon, PageHeader, ProgressBar, RoleBadge, Spinner } from '../shared/ui';
+import type { Invitation, Member, Role } from '../shared/types';
+import { Alert, Avatar, Badge, EmptyState, Icon, PageHeader, ProgressBar, RoleBadge, Spinner } from '../shared/ui';
 import { toApiError } from '../shared/useSave';
 
 export function PeoplePage() {
@@ -26,6 +27,7 @@ export function PeoplePage() {
   const { currentProject, loading, refresh } = useProjectScope();
   const navigate = useNavigate();
   const [members, setMembers] = useState<Member[] | null>(null);
+  const [pending, setPending] = useState<Invitation[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [inviting, setInviting] = useState(false);
@@ -36,6 +38,8 @@ export function PeoplePage() {
     if (!currentProject) return;
     try {
       setMembers(await memberController.list(currentProject.id));
+      // Only owners and managers may see the project's open invitations.
+      setPending(isManager(currentProject.my_role) ? await memberController.invitations(currentProject.id) : []);
     } catch (err) {
       setError(toApiError(err).detail);
     }
@@ -43,6 +47,7 @@ export function PeoplePage() {
 
   useEffect(() => { setMembers(null); void load(); }, [currentProject?.id]); // eslint-disable-line react-hooks/exhaustive-deps
   useRealtime('membership_changed', (d: { project_id: string }) => d.project_id === currentProject?.id && void load());
+  useRealtime('invitation', (d: { project_id: string }) => d.project_id === currentProject?.id && void load());
 
   if (loading) return <Spinner />;
   if (!currentProject) return <EmptyState title="No project selected" icon="users" />;
@@ -60,6 +65,18 @@ export function PeoplePage() {
     } catch (err) {
       setError(toApiError(err).detail);
       await load(); // put the select back to the saved role
+    }
+  };
+
+  const cancelInvitation = async (inv: Invitation) => {
+    setError(null);
+    try {
+      await memberController.cancelInvitation(currentProject.id, inv.id);
+      setNotice(`The invitation to ${inv.invitee.display_name} was cancelled.`);
+      await load();
+    } catch (err) {
+      setError(toApiError(err).detail);
+      await load();
     }
   };
 
@@ -86,7 +103,7 @@ export function PeoplePage() {
         actions={
           <>
             <ProjectPicker />
-            {manager ? <button type="button" className="btn-primary" onClick={() => setInviting(true)}><Icon name="plus" /> Add member</button> : null}
+            {manager ? <button type="button" className="btn-primary" onClick={() => setInviting(true)}><Icon name="plus" /> Invite member</button> : null}
           </>
         }
       />
@@ -95,6 +112,27 @@ export function PeoplePage() {
         {notice ? <Alert tone="ok" onClose={() => setNotice(null)}>{notice}</Alert> : null}
         {!manager ? <Alert tone="info">Only owners and managers can add people, change roles or remove members.</Alert> : null}
       </div>
+      {pending.length > 0 ? (
+        <section className="card mb-6 p-5" aria-label="Pending invitations">
+          <h2 className="text-base font-bold text-ink">Pending invitations ({pending.length})</h2>
+          <p className="mt-0.5 text-[13px] text-muted">These people join only after they accept.</p>
+          <ul className="mt-3 divide-y divide-line">
+            {pending.map((inv) => (
+              <li key={inv.id} className="flex flex-wrap items-center gap-3 py-2.5" data-invitation-id={inv.id}>
+                <Avatar name={inv.invitee.display_name || inv.invitee.username} url={inv.invitee.avatar_url} size="h-9 w-9" text="text-xs" />
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-semibold text-ink">{inv.invitee.display_name} <span className="font-normal text-muted">@{inv.invitee.username}</span></p>
+                  <p className="text-xs text-muted">Invited as <RoleBadge role={inv.role} /> by {inv.invited_by?.display_name ?? 'someone who left'}</p>
+                </div>
+                <Badge tone="warn" icon="clock">Pending</Badge>
+                <button type="button" className="btn-ghost btn-sm hover:text-danger" onClick={() => void cancelInvitation(inv)} aria-label={`Cancel invitation to ${inv.invitee.display_name}`}>
+                  <Icon name="x" className="h-3.5 w-3.5" /> Cancel
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
       {(members?.length ?? 0) > 8 ? (
         <div className="relative mb-6 max-w-sm">
           <Icon name="search" className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
@@ -139,7 +177,7 @@ export function PeoplePage() {
           })}
         </div>
       )}
-      <InviteMemberModal open={inviting} projectId={currentProject.id} callerRole={callerRole} onClose={() => setInviting(false)} onInvited={(m) => { setInviting(false); setNotice(`${m.display_name} was added as ${m.role}.`); void load(); }} />
+      <InviteMemberModal open={inviting} projectId={currentProject.id} callerRole={callerRole} onClose={() => setInviting(false)} onInvited={(inv) => { setInviting(false); setNotice(`Invitation sent to ${inv.invitee.display_name}. They join as ${inv.role} once they accept.`); void load(); }} />
       <ReassignTasksModal open={!!removing} projectId={currentProject.id} member={removing} members={members ?? []} onClose={() => setRemoving(null)} onRemoved={(msg) => { setRemoving(null); setNotice(msg); void load(); }} />
     </div>
   );

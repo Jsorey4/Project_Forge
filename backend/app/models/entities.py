@@ -55,8 +55,11 @@ NOTIFICATION_KINDS = (
     "soft_deadline_reminder",
     "task_reassigned",
     "project_update",
+    "invitation",
+    "invitation_response",
     "system",
 )
+INVITATION_STATUSES = ("pending", "accepted", "declined", "cancelled")
 
 # SE-FR-29 / profile.html "Notification preferences": which notification kinds a user receives.
 DEFAULT_NOTIFICATION_PREFS: dict[str, bool] = {
@@ -184,6 +187,40 @@ class ProjectMember(Base):
     def can_assign_tasks(self) -> bool:
         """Membership.canAssignTasks() from the Class Diagram."""
         return self.role in ("owner", "manager")
+
+
+class Invitation(Base):
+    """UC-19: an owner / manager invites an existing user; nothing changes until the invitee accepts."""
+
+    __tablename__ = "project_invitations"
+    __table_args__ = (
+        CheckConstraint(_in("role", ROLES), name="ck_project_invitations_role"),
+        CheckConstraint(_in("status", INVITATION_STATUSES), name="ck_project_invitations_status"),
+        # At most one open invitation per person per project.
+        Index(
+            "uq_project_invitations_one_pending",
+            "project_id",
+            "invitee_id",
+            unique=True,
+            postgresql_where=text("status = 'pending'"),
+            sqlite_where=text("status = 'pending'"),
+        ),
+        Index("ix_project_invitations_invitee_status", "invitee_id", "status"),
+        Index("ix_project_invitations_project_status", "project_id", "status"),
+    )
+
+    id: Mapped[str] = mapped_column(GUID(), primary_key=True, default=new_id)
+    project_id: Mapped[str] = mapped_column(GUID(), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    invitee_id: Mapped[str] = mapped_column(GUID(), ForeignKey("user_profiles.id", ondelete="CASCADE"), nullable=False)
+    invited_by: Mapped[str | None] = mapped_column(GUID(), ForeignKey("user_profiles.id", ondelete="SET NULL"))
+    role: Mapped[str] = mapped_column(String(10), nullable=False, default="member")
+    status: Mapped[str] = mapped_column(String(10), nullable=False, default="pending")
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False, default=utcnow)
+    responded_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+
+    project: Mapped[Project] = relationship()
+    invitee: Mapped[UserProfile] = relationship(foreign_keys=[invitee_id])
+    inviter: Mapped[UserProfile | None] = relationship(foreign_keys=[invited_by])
 
 
 class TaskList(Base):

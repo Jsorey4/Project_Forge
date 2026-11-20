@@ -17,6 +17,7 @@ export type RealtimeEventType =
   | 'comment_added'
   | 'soft_deadline_changed'
   | 'membership_changed'
+  | 'invitation'
   | 'project_created'
   | 'project_updated'
   | 'project_deleted'

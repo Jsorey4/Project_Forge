@@ -36,11 +36,12 @@ function SumCard({ name, pill, value, of, pct, color, selected }: { name: string
   );
 }
 
-function FinancialsForm({ summary, projectId, onSaved }: { summary: CostSummary; projectId: string; onSaved: (s: CostSummary) => void }) {
+// `saved` is owned by the page: the form is re-keyed when a save changes the amounts (so the inputs show the stored
+// values), which would otherwise throw the confirmation away together with the old instance.
+function FinancialsForm({ summary, projectId, onSaved, saved, setSaved }: { summary: CostSummary; projectId: string; onSaved: (s: CostSummary) => void; saved: boolean; setSaved: (v: boolean) => void }) {
   const [bid, setBid] = useState(summary.bid_amount);
   const [budget, setBudget] = useState(summary.budget_amount);
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [saved, setSaved] = useState(false);
   const save = useSave(() => costController.updateFinancials(projectId, { bid_amount: normalizeAmount(bid), budget_amount: normalizeAmount(budget) }), (s) => { onSaved(s); setSaved(true); });
   const submit = () => {
     const e: Record<string, string> = {};
@@ -77,6 +78,7 @@ export function CostsPage() {
   const [query, setQuery] = useState<CostQuery>({ sort_by: 'expense_date', sort_dir: 'desc' });
   const [selected, setSelected] = useState<Set<string> | null>(null);
   const [exporting, setExporting] = useState(false);
+  const [financialsSaved, setFinancialsSaved] = useState(false);
   const searchTimer = useRef<ReturnType<typeof setTimeout>>();
 
   const load = useCallback(async (q: CostQuery, sel: Set<string> | null) => {
@@ -99,6 +101,7 @@ export function CostsPage() {
     setSummary(null);
     setSelected(null);
     setDenied(false);
+    setFinancialsSaved(false);
     void load(query, null);
   }, [projectId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -169,7 +172,7 @@ export function CostsPage() {
             <ExpenseTable projectId={currentProject.id} summary={summary} query={query} onQuery={onQuery} onChanged={() => void load(query, selected)} />
           </Card>
           <Card title="Bid & budget">
-            <FinancialsForm key={`${summary.bid_amount}-${summary.budget_amount}`} summary={summary} projectId={currentProject.id} onSaved={setSummary} />
+            <FinancialsForm key={`${summary.bid_amount}-${summary.budget_amount}`} summary={summary} projectId={currentProject.id} onSaved={setSummary} saved={financialsSaved} setSaved={setFinancialsSaved} />
           </Card>
           <p className="flex items-center gap-2 text-[13px] text-muted"><Icon name="info" className="h-4 w-4" /> Bids, budgets, stage costs and expenses are tracked separately and are never added together. Amounts are exact to the cent.</p>
         </div>

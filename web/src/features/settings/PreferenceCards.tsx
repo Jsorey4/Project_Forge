@@ -4,9 +4,9 @@
  *   Notification preferences: four switches (task assignments, mentions, deadline reminders, project
  *   updates) saved to the user's profile the moment they are flipped; the server reads the same values
  *   before it creates a notification, so a muted kind is never delivered. Connections: Google Calendar,
- *   Outlook and Google Sheets, each showing "Connected" or a Connect button. Connecting records the user's
- *   consent for one-way exports (calendar deadlines, spreadsheet data) so the export dialog does not ask
- *   again; no OAuth tokens are stored and nothing is ever imported.
+ *   Outlook and Google Sheets, each showing "Connected" or a Connect button. Connecting only records which
+ *   provider the user chose for one-way exports; the export dialog still asks for consent every time for
+ *   Google and Outlook (UC-14). No OAuth tokens are stored and nothing is ever imported.
  * @traces SE-FR-19, SE-FR-20, SE-FR-29, UC-14, UC-15, UC-22
  */
 import { useState, type ReactNode } from 'react';

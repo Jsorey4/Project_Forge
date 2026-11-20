@@ -3,7 +3,8 @@
  * @description A task card on the board, matching tasks.html: title, the feature list it belongs to, "Due
  *   <date>" (or a check mark and "Done <date>"), small checkpoint / comment counters and the assignee's
  *   avatar. Selecting a card shows it in the Task details panel; cards the user may move are draggable,
- *   others show a lock.
+ *   others show a lock. People who may update the task also get a round check button that completes it (or
+ *   reopens it) in one click.
  * @traces SE-FR-26, SE-FR-27, SE-FR-07, UC-18
  */
 import type { DragEvent } from 'react';
@@ -19,10 +20,12 @@ interface Props {
   selected?: boolean;
   onSelect?: (task: Task) => void;
   onOpen?: (task: Task) => void;
+  /** Present only when the user may update this task: toggles it between done and to do. */
+  onToggleDone?: (task: Task) => void;
   onDragStart: (e: DragEvent<HTMLElement>, task: Task) => void;
 }
 
-export function TaskCard({ task, list, draggable, selected, onSelect, onOpen, onDragStart }: Props) {
+export function TaskCard({ task, list, draggable, selected, onSelect, onOpen, onToggleDone, onDragStart }: Props) {
   const overdue = isOverdue(task);
   const done = task.status === 'done';
   return (
@@ -40,7 +43,19 @@ export function TaskCard({ task, list, draggable, selected, onSelect, onOpen, on
     >
       <div className="flex items-start justify-between gap-2">
         <p className={`flex items-center gap-2 text-sm font-semibold leading-5 ${done ? 'text-body' : 'text-ink'}`}>
-          {done ? <Icon name="check-circle" className="h-4 w-4 text-ok" /> : null}
+          {onToggleDone ? (
+            <button
+              type="button"
+              role="checkbox"
+              aria-checked={done}
+              aria-label={done ? `Reopen ${task.title}` : `Mark ${task.title} as done`}
+              onClick={(e) => { e.stopPropagation(); onToggleDone(task); }}
+              onDoubleClick={(e) => e.stopPropagation()}
+              className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full border transition ${done ? 'border-ok bg-ok text-canvas' : 'border-line-strong text-transparent hover:border-ok hover:text-ok'}`}
+            >
+              <Icon name="check" className="h-3 w-3" />
+            </button>
+          ) : done ? <Icon name="check-circle" className="h-4 w-4 text-ok" /> : null}
           {task.title}
         </p>
         {!draggable ? <Icon name="lock" className="mt-0.5 h-3.5 w-3.5 text-muted" title="Only the assignee or a manager can move this task" /> : null}

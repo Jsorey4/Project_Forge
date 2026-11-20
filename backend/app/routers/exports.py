@@ -1,12 +1,13 @@
 """
 @author: Saaqib Shaik
-@description: Exports a project's deadlines to a calendar and its data to a spreadsheet. Calendar export
-    builds a standards-compliant .ics file (RFC 5545) or, after the user explicitly consents, ready-made
-    "add to Google Calendar / Outlook" links; if consent is declined nothing is shared. Spreadsheet export
-    builds an .xlsx workbook (or a Google Sheets values payload) containing only what the caller's role
-    may see - members never get financial sheets or other people's hours - and every text cell is
+@description: Exports a project's deadlines to a calendar and its data to a spreadsheet. The iCalendar
+    (.ics, RFC 5545) and Excel (.xlsx) exports are generated here and downloaded. Google Calendar, Outlook
+    and Google Sheets need the person's explicit consent first (declining shares nothing) and also need
+    the provider's OAuth application credentials on the server; without them the answer is a clear "not
+    set up" error that offers Retry, never a made-up success. Each export contains only what the caller's
+    role may see - members never get financial sheets or other people's hours - and every text cell is
     neutralised against formula injection first. Exporting nothing returns "Nothing to export".
-@traces: SE-FR-19, SE-FR-20, UC-14, UC-15
+@traces: SE-FR-19, SE-FR-20, SE-NFR-02, UC-14, UC-15
 """
 
 from __future__ import annotations
@@ -26,6 +27,7 @@ from openpyxl.utils import get_column_letter
 from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
 
+from app.core.config import get_settings
 from app.core.database import get_db, utcnow
 from app.core.permissions import ALL_ROLES, MANAGERS, require_project_role
 from app.core.sanitizer import clean_text, sanitize_spreadsheet_cell
@@ -43,6 +45,14 @@ from app.schemas.dto import (
 router = APIRouter(prefix="/api/projects/{project_id}/export", tags=["exports"])
 
 NOTHING_TO_EXPORT = "Nothing to export"
+PROVIDER_NOT_CONFIGURED = (
+    "{name} export is not set up on this server: its OAuth credentials ({variables}) are missing. "
+    "Nothing was sent to {name}. Download the .ics file instead, or ask an administrator to configure it, then retry."
+)
+SHEETS_NOT_BUILT = (
+    "Creating a Google Sheet needs the Google authorization flow, which this build does not include yet. "
+    "Nothing was sent to Google. Use the Excel (.xlsx) download instead."
+)
 CONSENT_DECLINED = "Export cancelled: calendar access was not authorized, so no data was shared."
 EVENT_LENGTH = timedelta(minutes=30)
 XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -230,6 +240,20 @@ def export_calendar(
     deadlines = collect_deadlines(db, project, body)
     if not deadlines:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=NOTHING_TO_EXPORT)
+    if body.target in ("google", "outlook"):
+        # UC-14: consent was given, but no event can be created without the provider's OAuth application.
+        # Say so (503, the Retry button stays available) instead of reporting events that were not added.
+        cfg = get_settings()
+        if body.target == "google" and not cfg.google_oauth_configured:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=PROVIDER_NOT_CONFIGURED.format(name="Google Calendar", variables="GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET"),
+            )
+        if body.target == "outlook" and not cfg.microsoft_oauth_configured:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=PROVIDER_NOT_CONFIGURED.format(name="Outlook Calendar", variables="MICROSOFT_OAUTH_CLIENT_ID, MICROSOFT_OAUTH_CLIENT_SECRET"),
+            )
     if body.target == "ical":
         content = build_ics(project, deadlines)
         return Response(
@@ -241,9 +265,11 @@ def export_calendar(
                 "Access-Control-Expose-Headers": "Content-Disposition, X-Export-Count",
             },
         )
+    # Credentials are configured. The token exchange itself is not built, so the honest result is one
+    # "add this event" link per deadline for the person to open - never a claim that events were added.
     links = [ProviderLink(title=d.title, starts_at=d.starts_at, url=provider_link(body.target, d)) for d in deadlines]
-    noun = "deadline" if len(links) == 1 else "deadlines"
-    return CalendarExportResult(message=f"{len(links)} {noun} added", count=len(links), provider_links=links)
+    noun = "link" if len(links) == 1 else "links"
+    return CalendarExportResult(message=f"{len(links)} add-to-calendar {noun} ready. Open each one to add the event.", count=len(links), provider_links=links)
 
 
 # ---------------------------------------------------------------------------
@@ -438,8 +464,11 @@ def export_spreadsheet(
                 "Access-Control-Expose-Headers": "Content-Disposition, X-Export-Count",
             },
         )
-    return SheetsExportResult(
-        message=f"{job.record_count} records ready for Google Sheets",
-        count=job.record_count,
-        sheets=job.sheets_payload(),
-    )
+    # UC-15: no sheet can be created without Google's authorization, so never return a payload that looks
+    # like success. 503 = not configured (retry after configuring), 501 = configured but not built.
+    if not get_settings().google_oauth_configured:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=PROVIDER_NOT_CONFIGURED.format(name="Google Sheets", variables="GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET"),
+        )
+    raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail=SHEETS_NOT_BUILT)

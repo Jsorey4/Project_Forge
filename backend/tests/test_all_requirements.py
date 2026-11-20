@@ -22,6 +22,10 @@ os.environ["BCRYPT_ROUNDS"] = "4"
 os.environ["JWT_SECRET"] = "test-secret-" + "x" * 40
 os.environ["DEMO_MODE"] = "true"
 os.environ["SEED_DEMO_DATA"] = "true"
+# These tests sign in with a password alone and create reminders on demand, so the always-on 2FA step and
+# the background reminder timer are switched off here; tests that need them switch them back on.
+os.environ["REQUIRE_MFA"] = "false"
+os.environ["REMINDER_INTERVAL_SECONDS"] = "0"
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
@@ -327,7 +331,9 @@ def test_uc08_uc09_auth_lockout_and_rate_limit_uc10_uc11_se_fr11(client):
     assert "uppercase" in bad.json()["errors"]["password"]
 
     ok = client.post("/api/auth/signup", json={"username": "lockme", "email": "lockme@example.com", "password": "Str0ng!Pass"})
-    assert ok.status_code == 201 and ok.json()["access_token"]
+    # UC-08: sign-up only confirms the registration and sends the person to Log In: no session is started.
+    assert ok.status_code == 201 and "access_token" not in ok.json() and ok.json()["redirect_to"] == "/login"
+    assert ok.json()["message"] == "Account created. Log in to continue." and ok.json()["user"]["username"] == "lockme"
     dup = client.post("/api/auth/signup", json={"username": "LOCKME", "email": "LockMe@example.com", "password": "Str0ng!Pass"})
     assert dup.status_code == 422 and {"username", "email"} <= set(dup.json()["errors"])
 
@@ -391,7 +397,7 @@ def test_uc08_uc09_auth_lockout_and_rate_limit_uc10_uc11_se_fr11(client):
 # ---------------------------------------------------------------------------
 # 5. UC-12 / UC-13 / UC-14 / UC-15 projects & exports (Saaqib Shaik)
 # ---------------------------------------------------------------------------
-def test_uc12_uc14_uc15_project_and_exports_uc13_se_fr16_to_se_fr20_se_nfr09_se_nfr10(client):
+def test_uc12_uc14_uc15_project_and_exports_uc13_se_fr16_to_se_fr20_se_nfr09_se_nfr10(client, monkeypatch):
     names = [f"bulk_user_{i:02d}" for i in range(55)]
     with SessionLocal() as db:
         pw = hash_password(DEMO_PASSWORD)
@@ -464,11 +470,27 @@ def test_uc12_uc14_uc15_project_and_exports_uc13_se_fr16_to_se_fr20_se_nfr09_se_
 
     declined = client.post(f"/api/projects/{pid}/export/calendar", headers=H(client, "jon"), json={"target": "google", "oauth_consent": False})
     assert declined.status_code == 400 and "provider_links" not in declined.json()
+    # Consent given but no OAuth application configured on the server: a clear error, never a fake success.
+    for target, name in (("google", "Google Calendar"), ("outlook", "Outlook Calendar")):
+        refused = client.post(f"/api/projects/{pid}/export/calendar", headers=H(client, "jon"), json={"target": target, "oauth_consent": True})
+        assert refused.status_code == 503 and "not set up" in refused.json()["detail"] and name in refused.json()["detail"]
+        assert "Nothing was sent" in refused.json()["detail"] and "added" not in refused.json()["detail"].replace("Nothing was sent", "")
+    # With credentials configured the answer is honest "add this event" links (the token exchange is not built).
+    import dataclasses
+
+    import app.routers.exports as exports_module
+
+    configured = dataclasses.replace(
+        exports_module.get_settings(), google_oauth_client_id="id", google_oauth_client_secret="secret",
+        microsoft_oauth_client_id="id", microsoft_oauth_client_secret="secret",
+    )
+    monkeypatch.setattr(exports_module, "get_settings", lambda: configured)
     google = client.post(f"/api/projects/{pid}/export/calendar", headers=H(client, "jon"), json={"target": "google", "oauth_consent": True}).json()
-    assert google["message"] == "7 deadlines added" and google["count"] == 7
+    assert google["count"] == 7 and google["message"].startswith("7 add-to-calendar links ready") and "added" not in google["message"].replace("add-to-calendar", "")
     assert all(link["url"].startswith("https://calendar.google.com/") for link in google["provider_links"])
     outlook = client.post(f"/api/projects/{pid}/export/calendar", headers=H(client, "jon"), json={"target": "outlook", "oauth_consent": True}).json()
     assert outlook["provider_links"][0]["url"].startswith("https://outlook.live.com/")
+    monkeypatch.undo()
     nothing = client.post(
         f"/api/projects/{pid}/export/calendar", headers=H(client, "jon"),
         json={"target": "ical", "include_project_deadline": False, "include_task_due_dates": False, "include_soft_deadlines": False},
@@ -487,10 +509,12 @@ def test_uc12_uc14_uc15_project_and_exports_uc13_se_fr16_to_se_fr20_se_nfr09_se_
     for row in wb["Tasks"].iter_rows(min_row=2):
         assert row[0].data_type == "s"  # stored as text, never as a formula
 
-    member_sheets = client.post(f"/api/projects/{pid}/export/spreadsheet", headers=H(client, "bulk_user_00"),
-                                json={"target": "sheets", "sections": ["tasks", "expenses", "financials"]})
-    assert member_sheets.status_code == 200
-    assert [s["title"] for s in member_sheets.json()["sheets"]] == ["Tasks"]  # financial sections dropped for members
+    # UC-15 Google Sheets: no sheet can be created here, so the answer is a clear error (503 not configured),
+    # for owners and members alike, and nothing that looks like a link or a success.
+    for who in ("jon", "bulk_user_00"):
+        sheets = client.post(f"/api/projects/{pid}/export/spreadsheet", headers=H(client, who), json={"target": "sheets"})
+        assert sheets.status_code == 503 and "Google Sheets" in sheets.json()["detail"] and "Nothing was sent" in sheets.json()["detail"]
+        assert set(sheets.json()) == {"detail"}
     member_xlsx = client.post(f"/api/projects/{pid}/export/spreadsheet", headers=H(client, "bulk_user_00"), json={"target": "excel"})
     assert "Expenses" not in load_workbook(io.BytesIO(member_xlsx.content)).sheetnames
     empty = new_project(client, name="Empty export")
@@ -610,7 +634,8 @@ def test_uc18_uc20_uc21_tasks_last_owner_and_mentions_se_fr26_to_se_fr30_se_nfr1
     # UC-20 last-owner protection.
     last = set_role(client, pid, "jon", "jon", "manager")
     assert last.status_code == 400 and last.json()["detail"] == "Project must have at least one owner"
-    assert set_role(client, pid, "tyler", "jon", "member").status_code == 400
+    # A manager may not touch the owner role at all, so this is refused (403) before the last-owner rule applies.
+    assert set_role(client, pid, "tyler", "jon", "member").status_code == 403
     assert set_role(client, pid, "tyler", "staff", "owner").status_code == 403  # managers cannot grant ownership
     assert set_role(client, pid, "staff", "aashwat", "manager").status_code == 403  # members cannot change roles
     assert set_role(client, pid, "jon", "tyler", "owner").status_code == 200
@@ -707,8 +732,12 @@ def test_uc19_member_removal_reassigns_open_tasks_se_fr30(client):
     assert client.get(f"/api/projects/{pid}", headers=H(client, "staff")).status_code == 403  # access revoked immediately
 
     invite = client.post(f"/api/projects/{pid}/members/invite", headers=H(client, "tyler"), json={"identifier": "staff@example.com"})
-    assert invite.status_code == 201 and invite.json()["role"] == "member"
+    assert invite.status_code == 201 and invite.json()["role"] == "member" and invite.json()["status"] == "pending"
+    assert client.get(f"/api/projects/{pid}", headers=H(client, "staff")).status_code == 403  # nothing changes until they accept
     assert client.post(f"/api/projects/{pid}/members/invite", headers=H(client, "tyler"), json={"identifier": "staff"}).status_code == 409
+    accepted = client.post(f"/api/invitations/{invite.json()['id']}/accept", headers=H(client, "staff"))
+    assert accepted.status_code == 200 and accepted.json()["status"] == "accepted"
+    assert client.get(f"/api/projects/{pid}", headers=H(client, "staff")).status_code == 200  # now a member
     assert client.post(f"/api/projects/{pid}/members/invite", headers=H(client, "tyler"), json={"identifier": "nobody_here"}).status_code == 404
     assert client.post(f"/api/projects/{pid}/members/invite", headers=H(client, "staff"), json={"identifier": "preethi"}).status_code == 403
     last = client.delete(f"/api/projects/{pid}/members/{user_id('jon')}", headers=H(client, "jon"))
@@ -719,6 +748,11 @@ def test_uc22_notifications_and_deadline_reminders_se_fr29(client):
     project = new_project(client, members=["staff"], name="Reminders")
     pid = project["id"]
     task = new_task(client, pid, title="Due soon", assignee_id=user_id("staff"), due_date=iso(future(0.5)))
+    # Reading the list never creates reminders; the reminder job (here: its manual trigger) does, once.
+    assert not [n for n in client.get("/api/notifications", headers=H(client, "staff")).json()["items"] if n["kind"] == "deadline_reminder" and n["task_id"] == task["id"]]
+    run = client.post("/api/notifications/reminders/run", headers=H(client, "staff")).json()
+    assert run["scope"] == "all" and run["reminders_created"] >= 1 and run["mine"] == 1
+    assert client.post("/api/notifications/reminders/run", headers=H(client, "staff")).json()["mine"] == 0  # running twice changes nothing
     first = client.get("/api/notifications", headers=H(client, "staff")).json()
     second = client.get("/api/notifications", headers=H(client, "staff")).json()
     reminders = [n for n in second["items"] if n["kind"] == "deadline_reminder" and n["task_id"] == task["id"]]
@@ -884,8 +918,10 @@ def test_se_fr29_notification_preferences_and_connected_accounts_uc22_uc14(clien
     # Deadline reminders switch (UC-22).
     soon = new_task(client, pid, title="Due tomorrow", assignee_id=user_id("aashwat"), due_date=iso(future(0.5)))
     assert put("aashwat", {"notification_prefs": {"deadline_reminders": False}}).status_code == 200
-    assert "deadline_reminder" not in kinds("aashwat")
+    client.post("/api/notifications/reminders/run", headers=H(client, "aashwat"))
+    assert "deadline_reminder" not in kinds("aashwat")  # muted: the job skips this person
     assert put("aashwat", {"notification_prefs": {"deadline_reminders": True}}).status_code == 200
+    assert client.post("/api/notifications/reminders/run", headers=H(client, "aashwat")).json()["mine"] >= 1
     reminders = [n for n in client.get("/api/notifications", headers=H(client, "aashwat")).json()["items"] if n["kind"] == "deadline_reminder"]
     assert any(n["task_id"] == soon["id"] for n in reminders)
 

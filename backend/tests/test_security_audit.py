@@ -64,7 +64,7 @@ from app.core.security import (
 from app.main import MAX_REQUEST_BYTES, app
 from app.models.entities import Comment, Expense, Notification, ProjectMember, SoftDeadline, StageCost, Task, TimeEntry, UserProfile
 from app.routers.collaboration import MENTION_RE, extract_mentions, strip_mentions
-from app.routers.exports import _ics_escape, build_ics, Deadline
+from app.routers.exports import Deadline, ExportJob, _ics_escape, build_ics
 from app.routers.projects import percent
 
 POSTGRES = database_kind() == "postgresql"
@@ -697,15 +697,23 @@ def test_uc15_every_string_cell_that_could_be_a_formula_is_prefixed_se_fr20(clie
     assert sorted(Decimal(str(a)) for a in amounts) == [Decimal("0.1"), Decimal("0.2"), Decimal("10.1")]  # numbers stay numbers
     assert workbook["Stage costs"]["B2"].number_format == "0.00"
 
-    sheets = client.post(f"/api/projects/{pid}/export/spreadsheet", headers=jon, json={"target": "sheets"}).json()["sheets"]
-    for sheet in sheets:
+    # The Google Sheets values payload is built by the same job and sanitized the same way (the endpoint
+    # itself answers "not set up" without OAuth, so the payload is checked directly).
+    from app.models.entities import Project
+
+    with SessionLocal() as db:
+        job = ExportJob(db, db.get(Project, pid), db.get(UserProfile, jon_id), "owner", None)
+        job.collect()
+        payload = [{"title": s.title, "values": s.values} for s in job.sheets_payload()]
+    assert {s["title"] for s in payload} == {"Tasks", "Soft deadlines", "Time entries", "Bid & budget", "Stage costs", "Expenses"}
+    for sheet in payload:
         for row in sheet["values"]:
             for value in row:
                 if isinstance(value, str):
                     assert value.lstrip(" \u200b")[:1] not in ("=", "+", "-", "@", "\t", "\r", "\n"), (sheet["title"], value)
 
 
-def test_uc14_calendar_export_cannot_be_used_to_inject_ics_properties_se_fr19(client):
+def test_uc14_calendar_export_cannot_be_used_to_inject_ics_properties_se_fr19(client, monkeypatch):
     assert _ics_escape("a\r\nATTACH:http://evil.example/x") == "a\\nATTACH:http://evil.example/x"
     assert _ics_escape("lone\rCR and lone\nLF") == "lone\\nCR and lone\\nLF"
     assert _ics_escape("semi;colon, comma\\slash") == "semi\\;colon\\, comma\\\\slash"
@@ -756,6 +764,12 @@ def test_uc14_calendar_export_cannot_be_used_to_inject_ics_properties_se_fr19(cl
     forged = build_ics(project_row, [Deadline(uid="u@projectforge", title="t\r\nATTACH:x", starts_at=future(1), description="d\rORGANIZER:x", category="c\nX:1")])
     assert "\r\nATTACH" not in forged and "\r\nORGANIZER" not in forged and "\r\nX:1" not in forged
     # The provider links carry the same titles URL-encoded, never as raw control characters.
+    import dataclasses
+
+    import app.routers.exports as exports_module
+
+    configured = dataclasses.replace(exports_module.get_settings(), google_oauth_client_id="id", google_oauth_client_secret="secret")
+    monkeypatch.setattr(exports_module, "get_settings", lambda: configured)
     google = client.post(f"/api/projects/{pid}/export/calendar", headers=H(client, "jon"), json={"target": "google", "oauth_consent": True}).json()
     assert all("\r" not in link["url"] and "\n" not in link["url"] and link["url"].startswith("https://calendar.google.com/") for link in google["provider_links"])
 

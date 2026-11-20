@@ -258,7 +258,7 @@ export function TimeTrackingPage() {
             </select>
           </Field>
           <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="Hours" htmlFor="me-hours" hint="0.25 to 24"><input id="me-hours" className="input" type="number" min={0.25} max={24} step="0.25" value={hours} onChange={(e) => setHours(e.target.value)} /></Field>
+            <Field label="Hours" htmlFor="me-hours" hint="More than 0, up to 24 (e.g. 1.5)"><input id="me-hours" className="input" type="number" min={0.01} max={24} step="any" value={hours} onChange={(e) => setHours(e.target.value)} /></Field>
             <Field label="Date" htmlFor="me-date"><input id="me-date" className="input" type="date" value={date} max={todayIso()} onChange={(e) => setDate(e.target.value)} /></Field>
           </div>
           <Field label="Note" htmlFor="me-note"><input id="me-note" className="input" value={note} maxLength={300} onChange={(e) => setNote(e.target.value)} placeholder="Optional" /></Field>

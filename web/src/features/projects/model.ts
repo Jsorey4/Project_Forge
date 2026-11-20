@@ -44,7 +44,7 @@ export function validateProjectForm(form: { name: string; deadline: string; proj
   return errors;
 }
 
-/** Splits "alice, @bob  carol" into unique usernames. */
+/** Splits "alice, @bob  carol@example.com" into unique usernames / emails (a leading "@" is dropped). */
 export function parseUsernames(raw: string): string[] {
   const seen = new Set<string>();
   const out: string[] = [];

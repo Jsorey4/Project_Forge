@@ -4,7 +4,8 @@
  *   Customize and New task buttons, then the widget grid (Upcoming deadlines, Task progress, Projects, Time
  *   tracked, Cost summary by default). Customize turns on dragging, hiding and removing widgets, the Add
  *   widget menu and Restore default. Moves are checked for overlap in the browser first and then by the
- *   server; a rejected move snaps back with a red outline. Widget data refreshes live.
+ *   server; a rejected move snaps back with a red outline. Hidden widgets stay listed in a "Hidden widgets"
+ *   strip with a Show button. Widget data refreshes live.
  * @traces SE-FR-21, SE-FR-22, SE-FR-23, SE-FR-24, SE-FR-25, SE-NFR-07, SE-NFR-08, UC-16, UC-17
  */
 import { useCallback, useEffect, useState } from 'react';
@@ -53,7 +54,17 @@ export function DashboardPage() {
       setNotice(success ?? null);
       setError(null);
     } catch (err) {
-      setError(toApiError(err).detail);
+      const apiErr = toApiError(err);
+      setError(apiErr.detail);
+      // A refusal ("Widget unavailable", "Invalid action") means this screen may be out of date, for example the
+      // widget was removed in another tab. Re-read the layout so it matches the server, but keep the message.
+      if (!apiErr.isConnectivity) {
+        try {
+          setPayload(await dashboardController.load());
+        } catch {
+          /* keep the current grid; the message above already tells the user what happened */
+        }
+      }
     }
   };
 
@@ -76,7 +87,8 @@ export function DashboardPage() {
 
   if (!payload) return error ? <Alert>{error}</Alert> : <Spinner label="Loading your dashboard…" />;
   const present = new Set(payload.widgets.filter((w) => !w.is_hidden).map((w) => w.widget_type));
-  const addable = payload.available_types.filter((t) => !present.has(t.widget_type));
+  const addable = payload.available_types.filter((t) => !present.has(t.widget_type) && !payload.widgets.some((w) => w.is_hidden && w.widget_type === t.widget_type));
+  const hidden = payload.widgets.filter((w) => w.is_hidden);
   const hour = new Date().getHours();
   const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
   const dueToday = (payload.data.task_progress as { due_today?: number } | undefined)?.due_today;
@@ -127,6 +139,16 @@ export function DashboardPage() {
         <RetryBanner error={pendingMove?.error ?? null} onRetry={() => pendingMove && void move(pendingMove.widget, pendingMove.x, pendingMove.y)} onCancel={() => setPendingMove(null)} />
         {editing ? <Alert tone="accent">Drag a widget by its handle (or focus the handle and use the arrow keys). Green outline = free spot, red = overlap.</Alert> : null}
       </div>
+      {hidden.length > 0 ? (
+        <section className="card mb-6 flex flex-wrap items-center gap-3 px-5 py-3" aria-label="Hidden widgets">
+          <span className="text-sm font-semibold text-ink">Hidden widgets</span>
+          {hidden.map((w) => (
+            <button key={w.id} type="button" className="btn-secondary btn-sm" onClick={() => void apply(() => dashboardController.show(w.id), `${w.title} is back on your dashboard`)} aria-label={`Show ${w.title}`}>
+              <Icon name="eye" className="h-3.5 w-3.5" /> Show {w.title}
+            </button>
+          ))}
+        </section>
+      ) : null}
       <WidgetGrid
         widgets={payload.widgets}
         columns={payload.grid_columns}
