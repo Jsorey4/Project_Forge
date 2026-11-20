@@ -65,7 +65,7 @@ function ExportCard() {
     try {
       if (kind === 'excel') {
         const { count, filename } = await exportController.downloadXlsx(project.id, sections);
-        setMessage({ tone: 'ok', text: `${count} records saved to ${filename}` });
+        setMessage({ tone: 'ok', text: `${count} record${count === 1 ? '' : 's'} saved to ${filename}` });
       } else {
         const result = await exportController.toSheets(project.id, sections);
         setMessage({ tone: 'ok', text: result.message });

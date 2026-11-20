@@ -47,7 +47,7 @@ router = APIRouter(prefix="/api/projects/{project_id}/export", tags=["exports"])
 NOTHING_TO_EXPORT = "Nothing to export"
 PROVIDER_NOT_CONFIGURED = (
     "{name} export is not set up on this server: its OAuth credentials ({variables}) are missing. "
-    "Nothing was sent to {name}. Download the .ics file instead, or ask an administrator to configure it, then retry."
+    "Nothing was sent to {name}. Download the {fallback} file instead, or ask an administrator to configure it, then retry."
 )
 SHEETS_NOT_BUILT = (
     "Creating a Google Sheet needs the Google authorization flow, which this build does not include yet. "
@@ -247,12 +247,12 @@ def export_calendar(
         if body.target == "google" and not cfg.google_oauth_configured:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=PROVIDER_NOT_CONFIGURED.format(name="Google Calendar", variables="GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET"),
+                detail=PROVIDER_NOT_CONFIGURED.format(name="Google Calendar", fallback=".ics", variables="GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET"),
             )
         if body.target == "outlook" and not cfg.microsoft_oauth_configured:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=PROVIDER_NOT_CONFIGURED.format(name="Outlook Calendar", variables="MICROSOFT_OAUTH_CLIENT_ID, MICROSOFT_OAUTH_CLIENT_SECRET"),
+                detail=PROVIDER_NOT_CONFIGURED.format(name="Outlook Calendar", fallback=".ics", variables="MICROSOFT_OAUTH_CLIENT_ID, MICROSOFT_OAUTH_CLIENT_SECRET"),
             )
     if body.target == "ical":
         content = build_ics(project, deadlines)
@@ -364,7 +364,9 @@ class ExportJob:
     def _financials(self) -> Sheet:
         sheet = Sheet("Bid & budget", ["Currency", "Bid amount", "Budget amount"])
         fin = self.db.get(ProjectFinancials, self.project.id)
-        if fin is not None:
+        # Opening the Cost page creates a 0.00 / 0.00 placeholder row; that is not a record anyone entered, so
+        # it must not turn an empty project's export into a file (UC-15: no matching records -> nothing to export).
+        if fin is not None and (fin.bid_amount or fin.budget_amount):
             sheet.rows.append([fin.currency, fin.bid_amount, fin.budget_amount])
         return sheet
 
@@ -469,6 +471,6 @@ def export_spreadsheet(
     if not get_settings().google_oauth_configured:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=PROVIDER_NOT_CONFIGURED.format(name="Google Sheets", variables="GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET"),
+            detail=PROVIDER_NOT_CONFIGURED.format(name="Google Sheets", fallback=".xlsx", variables="GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET"),
         )
     raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail=SHEETS_NOT_BUILT)

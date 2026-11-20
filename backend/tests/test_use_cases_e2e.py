@@ -469,3 +469,55 @@ def test_seed_is_repeatable_and_adds_only_what_is_missing():
         assert seed_test_accounts(db) == {"users": 1, "projects": 0}
         assert db.execute(select(UserProfile.id).where(UserProfile.email == "outsider@projectforge.dev")).first() is not None
     _account_tokens.pop("outsider@projectforge.dev", None)
+
+
+# ---------------------------------------------------------------------------
+# UC-02 (found by the screenshot walkthrough)
+# ---------------------------------------------------------------------------
+def test_uc02_a_project_or_period_with_no_hours_gives_an_empty_report_not_404_se_fr05_se_nfr02(client):
+    """No time entries used to build `id IN ('')`, which is not a valid id, so the report failed with 404."""
+    manager = account_headers(client, "manager@projectforge.dev")
+    empty = project_named(client, manager, EMPTY_PROJECT)
+    r = client.get(f"/api/projects/{empty['id']}/reports/performance", headers=manager)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["scope"] == "team" and body["totals"]["tasks_total"] == 0
+    assert body["totals"]["efficiency_pct"] == "N/A"  # undefined metric, never 0 %
+
+    populated = project_named(client, manager, POPULATED_PROJECT)
+    quiet = client.get(f"/api/projects/{populated['id']}/reports/performance",
+                       params={"start_date": "2020-01-01", "end_date": "2020-01-31"}, headers=manager)
+    assert quiet.status_code == 200, quiet.text
+    assert all(float(row["actual_hours"]) == 0 for row in quiet.json()["members"])
+
+    member = account_headers(client, "member@projectforge.dev")
+    mine = client.get(f"/api/projects/{populated['id']}/reports/performance",
+                      params={"start_date": "2020-01-01", "end_date": "2020-01-31"}, headers=member)
+    assert mine.status_code == 200 and mine.json()["scope"] == "self"
+
+
+def test_uc15_viewing_costs_does_not_turn_an_empty_project_export_into_a_file_se_fr20(client):
+    """Found by the screenshot walkthrough: opening Cost creates a 0.00 / 0.00 financials placeholder, which the
+    Bid & budget sheet then exported as "1 record", so the empty project never said "Nothing to export"."""
+    owner = account_headers(client, "owner@projectforge.dev")
+    empty = project_named(client, owner, EMPTY_PROJECT)
+    assert client.get(f"/api/projects/{empty['id']}/costs", headers=owner).status_code == 200  # creates the placeholder
+    every = ["tasks", "soft_deadlines", "time_entries", "financials", "stage_costs", "expenses"]
+    r = client.post(f"/api/projects/{empty['id']}/export/spreadsheet", headers=owner, json={"target": "excel", "sections": every})
+    assert r.status_code == 400 and r.json()["detail"] == "Nothing to export", r.text
+    # A real amount is still exported.
+    assert client.put(f"/api/projects/{empty['id']}/financials", headers=owner, json={"bid_amount": "0", "budget_amount": "350.00"}).status_code == 200
+    r = client.post(f"/api/projects/{empty['id']}/export/spreadsheet", headers=owner, json={"target": "excel", "sections": ["financials"]})
+    assert r.status_code == 200 and r.content[:2] == b"PK"
+    wb = load_workbook(io.BytesIO(r.content))
+    assert [[c for c in row] for row in wb["Bid & budget"].iter_rows(min_row=2, values_only=True)][0][2] in (350, "350.00", 350.0)
+
+
+def test_uc15_the_sheets_not_set_up_message_points_to_the_xlsx_download_not_ics_se_fr20(client):
+    """Found by the screenshot walkthrough: the spreadsheet error reused the calendar wording ("Download the .ics file")."""
+    owner = account_headers(client, "owner@projectforge.dev")
+    pid = project_named(client, owner, POPULATED_PROJECT)["id"]
+    sheets = client.post(f"/api/projects/{pid}/export/spreadsheet", headers=owner, json={"target": "sheets"})
+    assert sheets.status_code == 503 and ".xlsx" in sheets.json()["detail"] and ".ics" not in sheets.json()["detail"]
+    cal = client.post(f"/api/projects/{pid}/export/calendar", headers=owner, json={"target": "google", "oauth_consent": True})
+    assert cal.status_code == 503 and ".ics" in cal.json()["detail"]

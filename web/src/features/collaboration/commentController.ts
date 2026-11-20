@@ -13,10 +13,17 @@ export const commentController = {
   remove: (commentId: string) => api.del<void>(`/api/comments/${commentId}`),
 };
 
+/** Fired after the unread count changes on this device, so the sidebar badge can re-count (UC-22). */
+export const UNREAD_CHANGED = 'pf:unread-changed';
+const announceUnread = <T,>(result: T): T => {
+  window.dispatchEvent(new Event(UNREAD_CHANGED));
+  return result;
+};
+
 export const notificationController = {
   list: (unreadOnly = false) => api.get<NotificationList>('/api/notifications', { unread_only: unreadOnly }),
-  markRead: (id: string) => api.patch<Notification>(`/api/notifications/${id}/read`),
-  markAllRead: () => api.patch<NotificationList>('/api/notifications/read-all'),
+  markRead: (id: string) => api.patch<Notification>(`/api/notifications/${id}/read`).then(announceUnread),
+  markAllRead: () => api.patch<NotificationList>('/api/notifications/read-all').then(announceUnread),
   /** UC-22: runs the deadline-reminder job now. */
   runReminders: () => api.post<ReminderRunResult>('/api/notifications/reminders/run'),
 };

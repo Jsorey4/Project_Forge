@@ -101,7 +101,7 @@ export function ExportModal({ open, onClose, projectId, projectName, role, initi
     run(async () => {
       if (kind === 'excel') {
         const { count, filename } = await exportController.downloadXlsx(projectId, sections);
-        setMessage({ tone: 'ok', text: `${count} records saved to ${filename}` });
+        setMessage({ tone: 'ok', text: `${count} record${count === 1 ? '' : 's'} saved to ${filename}` });
       } else {
         const result = await exportController.toSheets(projectId, sections);
         setSheets(result);

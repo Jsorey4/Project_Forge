@@ -92,7 +92,7 @@ export function TaskForm({ open, onClose, projectId, role, members, lists, task,
         <RetryBanner error={save.networkError} onRetry={save.retry} onCancel={save.cancel} busy={save.saving} />
         {save.error && !Object.keys(save.fieldErrors).length ? <Alert>{save.error.detail}</Alert> : null}
         <Field label="Title" error={formErrors.title ?? save.fieldErrors.title} htmlFor="t-title">
-          <input id="t-title" className="input" value={title} maxLength={200} required aria-required="true" onChange={(e) => setTitle(e.target.value)} />
+          <input id="t-title" className="input" value={title} maxLength={200} required aria-required="true" onChange={(e) => { setTitle(e.target.value); if (formErrors.title) setFormErrors((f) => ({ ...f, title: undefined })); }} />
         </Field>
         <Field label="Description (Markdown)" htmlFor="t-desc" hint="**bold**, *italic*, `code`, - lists">
           <textarea id="t-desc" className="input min-h-[96px]" value={description} onChange={(e) => setDescription(e.target.value)} />

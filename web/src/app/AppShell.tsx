@@ -12,7 +12,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../features/auth/AuthProvider';
 import { authController } from '../features/auth/authController';
-import { notificationController } from '../features/collaboration/commentController';
+import { notificationController, UNREAD_CHANGED } from '../features/collaboration/commentController';
 import { ProjectScopeProvider } from '../features/projects/ProjectScope';
 import { realtime, useRealtime } from '../services/realtimeClient';
 import type { DemoUser, Notification } from '../shared/types';
@@ -172,6 +172,11 @@ export function AppShell() {
   }, []);
 
   useEffect(() => refreshUnread(), [refreshUnread, user?.id, location.pathname]);
+  useEffect(() => {
+    // Mark read / Mark all read on any screen: re-count so the badge matches the Notifications page.
+    window.addEventListener(UNREAD_CHANGED, refreshUnread);
+    return () => window.removeEventListener(UNREAD_CHANGED, refreshUnread);
+  }, [refreshUnread]);
   useRealtime('notification', (n: Notification) => {
     setUnread((u) => u + 1);
     setToasts((t) => [n, ...t].slice(0, 3));

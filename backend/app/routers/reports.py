@@ -103,13 +103,14 @@ def performance_report(
         week_start = started_at.date() - timedelta(days=started_at.weekday())
         weekly[week_start] += amount
 
+    # Tasks due in the period, plus tasks with hours logged in it. With no hours logged there is no id list at
+    # all: a placeholder such as [""] is not a valid id and made the whole report fail with 404 (UC-02: "no
+    # matching records -> empty report").
+    in_period = and_(Task.due_date >= range_start, Task.due_date < range_end)
     task_stmt = select(Task).where(
         Task.project_id == project_id,
         Task.assignee_id.is_not(None),
-        or_(
-            and_(Task.due_date >= range_start, Task.due_date < range_end),
-            Task.id.in_(list(actual_by_task) or [""]),
-        ),
+        or_(in_period, Task.id.in_(list(actual_by_task))) if actual_by_task else in_period,
     )
     if scope_user:
         task_stmt = task_stmt.where(Task.assignee_id == scope_user)

@@ -49,7 +49,14 @@ export function PerformancePage() {
     }
   }, [currentProject, start, end]);
 
-  useEffect(() => void load(), [currentProject?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  // A new project starts from a blank report: if its load fails, the previous project's charts must not stay
+  // on screen under the new project's name.
+  useEffect(() => {
+    setReport(null);
+    setError(null);
+    setLoadFailure(null);
+    void load();
+  }, [currentProject?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (loading) return <Spinner />;
   if (!currentProject) return <EmptyState title="No project selected" icon="chart" />;

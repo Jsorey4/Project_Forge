@@ -14,8 +14,10 @@ import { useAuth } from '../features/auth/AuthProvider';
 import { dashboardController } from '../features/dashboard/dashboardController';
 import { WidgetGrid } from '../features/dashboard/WidgetGrid';
 import { WidgetBody } from '../features/dashboard/widgets';
+import { useProjectScope } from '../features/projects/ProjectScope';
 import { ApiError } from '../services/apiClient';
 import { useRealtime } from '../services/realtimeClient';
+import { isManager } from '../shared/permissions';
 import type { DashboardPayload, Widget } from '../shared/types';
 import { Alert, Icon, PageHeader, RetryBanner, Spinner } from '../shared/ui';
 import { toApiError } from '../shared/useSave';
@@ -23,6 +25,9 @@ import { toApiError } from '../shared/useSave';
 export function DashboardPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const { projects } = useProjectScope();
+  // UI only (the server decides): offer "New task" only to someone who owns or manages a project.
+  const canCreateTasks = projects.some((p) => isManager(p.my_role));
   const [payload, setPayload] = useState<DashboardPayload | null>(null);
   const [editing, setEditing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -128,7 +133,7 @@ export function DashboardPage() {
           ) : (
             <>
               <button type="button" className="btn-secondary" onClick={() => setEditing(true)}>Customize</button>
-              <button type="button" className="btn-primary" onClick={() => navigate('/board?new=1')}><Icon name="plus" /> New task</button>
+              {canCreateTasks ? <button type="button" className="btn-primary" onClick={() => navigate('/board?new=1')}><Icon name="plus" /> New task</button> : null}
             </>
           )
         }
