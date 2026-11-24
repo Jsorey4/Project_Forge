@@ -4,7 +4,9 @@
     how much time is budgeted to the assignee (assigned hours); the person doing the work logs actual hours
     by typing them in or with a start / pause / resume / stop timer. A stopped timer's duration is
     (end - start - paused time) / 3600 rounded to 2 decimals. Members can only ever see their own entries.
-@traces: SE-FR-04, SE-NFR-02, UC-03, UC-04
+    A timer or manual entry can name the cost stage it was worked on (labor breakdown; UI idea ported from
+    Preethi Seereddy's frontend); the stage must belong to the task's project.
+@traces: SE-FR-01, SE-FR-04, SE-NFR-02, UC-03, UC-04
 """
 
 from __future__ import annotations
@@ -21,7 +23,7 @@ from app.core.database import get_db, utcnow
 from app.core.permissions import ALL_ROLES, MANAGERS, get_membership, require_project_role, require_task_access
 from app.core.realtime import hub
 from app.core.security import get_current_user
-from app.models.entities import Project, ProjectMember, Task, TimeEntry, UserProfile
+from app.models.entities import Project, ProjectMember, StageCost, Task, TimeEntry, UserProfile
 from app.schemas.dto import HoursUpdate, TaskHoursOut, TimeEntryOut, TimerAction, TimerStart
 
 router = APIRouter(tags=["time-tracking"])
@@ -30,6 +32,7 @@ CENT = Decimal("0.01")
 HOURS_DENIED = "Only owners and managers can set estimated or assigned hours"
 TRACK_DENIED = "You can only log time on tasks assigned to you"
 ALREADY_RUNNING = "You already have a running timer. Stop it first."
+WRONG_STAGE = "That stage does not belong to this project"
 
 
 def duration_hours(started_at: datetime, ended_at: datetime, paused_seconds: int) -> Decimal:
@@ -46,7 +49,17 @@ def elapsed_seconds(entry: TimeEntry, now: datetime) -> int:
     return max(0, int((end - entry.started_at).total_seconds()) - paused)
 
 
-def entry_out(entry: TimeEntry, task: Task, project_name: str, username: str) -> TimeEntryOut:
+def _validated_stage(db: Session, project_id: str, stage_cost_id: str | None) -> str | None:
+    """A stage may only come from the task's own project; anything else is a 422 and nothing is saved."""
+    if stage_cost_id is None:
+        return None
+    stage = db.get(StageCost, stage_cost_id)
+    if stage is None or stage.project_id != project_id:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=WRONG_STAGE)
+    return stage.id
+
+
+def entry_out(entry: TimeEntry, task: Task, project_name: str, username: str, stage_name: str | None = None) -> TimeEntryOut:
     now = utcnow()
     return TimeEntryOut(
         id=entry.id,
@@ -65,6 +78,8 @@ def entry_out(entry: TimeEntry, task: Task, project_name: str, username: str) ->
         elapsed_seconds=elapsed_seconds(entry, now),
         duration_hours=entry.duration_hours,
         note=entry.note,
+        stage_cost_id=entry.stage_cost_id,
+        stage_name=stage_name,
     )
 
 
@@ -72,7 +87,8 @@ def _entry_out_loaded(db: Session, entry: TimeEntry) -> TimeEntryOut:
     task = db.get(Task, entry.task_id)
     project = db.get(Project, entry.project_id)
     user = db.get(UserProfile, entry.user_id)
-    return entry_out(entry, task, project.name if project else "", user.username if user else "")
+    stage = db.get(StageCost, entry.stage_cost_id) if entry.stage_cost_id else None
+    return entry_out(entry, task, project.name if project else "", user.username if user else "", stage.stage_name if stage else None)
 
 
 def actual_hours(db: Session, task_id: str) -> Decimal:
@@ -123,7 +139,7 @@ def set_task_hours(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=HOURS_DENIED)
     if body.actual_hours is not None and not _may_track(membership.role, task, user.id):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=TRACK_DENIED)
-    if not fields - {"note", "work_date"}:
+    if not fields - {"note", "work_date", "stage_cost_id"}:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Provide estimated, assigned or actual hours")
 
     if "estimated_hours" in fields:
@@ -134,12 +150,14 @@ def set_task_hours(
         work_day = body.work_date or utcnow().date()
         if work_day > utcnow().date():
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Hours cannot be logged for a future date")
+        stage_id = _validated_stage(db, project_id, body.stage_cost_id)
         started = datetime.combine(work_day, time(9, 0))
         ended = started + timedelta(seconds=int(body.actual_hours * 3600))
         entry = TimeEntry(
             project_id=project_id,
             task_id=task.id,
             user_id=user.id,
+            stage_cost_id=stage_id,
             source="manual",
             started_at=started,
             ended_at=ended,
@@ -187,6 +205,7 @@ def start_timer(body: TimerStart, user: UserProfile = Depends(get_current_user),
     task, membership = require_task_access(db, user.id, body.task_id, ALL_ROLES)
     if not _may_track(membership.role, task, user.id):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=TRACK_DENIED)
+    stage_id = _validated_stage(db, task.project_id, body.stage_cost_id)
     running = db.execute(
         select(TimeEntry.id).where(TimeEntry.user_id == user.id, TimeEntry.ended_at.is_(None))
     ).first()
@@ -197,6 +216,7 @@ def start_timer(body: TimerStart, user: UserProfile = Depends(get_current_user),
         project_id=task.project_id,
         task_id=task.id,
         user_id=user.id,
+        stage_cost_id=stage_id,
         source="timer",
         started_at=now,
         paused_seconds=0,
@@ -265,10 +285,11 @@ def list_time_entries(
     if start_date and end_date and start_date > end_date:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Start date must be on or before end date")
     stmt = (
-        select(TimeEntry, Task, Project.name, UserProfile.username)
+        select(TimeEntry, Task, Project.name, UserProfile.username, StageCost.stage_name)
         .join(Task, Task.id == TimeEntry.task_id)
         .join(Project, Project.id == TimeEntry.project_id)
         .join(UserProfile, UserProfile.id == TimeEntry.user_id)
+        .outerjoin(StageCost, StageCost.id == TimeEntry.stage_cost_id)
     )
     if project_id:
         membership = require_project_role(db, user.id, project_id, ALL_ROLES)
@@ -293,7 +314,7 @@ def list_time_entries(
     if end_date:
         stmt = stmt.where(TimeEntry.started_at < datetime.combine(end_date + timedelta(days=1), time.min))
     rows = db.execute(stmt.order_by(TimeEntry.started_at.desc()).limit(limit)).all()
-    return [entry_out(e, t, pname, uname) for e, t, pname, uname in rows]
+    return [entry_out(e, t, pname, uname, sname) for e, t, pname, uname, sname in rows]
 
 
 @router.delete("/api/time-entries/{entry_id}", status_code=status.HTTP_204_NO_CONTENT)

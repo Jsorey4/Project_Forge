@@ -686,6 +686,91 @@ def test_uc03_uc04_hours_and_timer_se_fr04(client):
     assert own and all(e["username"] == "staff" for e in own)
 
 
+def test_uc01_uc04_stage_labor_comparison_is_exact_and_never_a_cost_total_se_fr01_se_fr04_se_nfr01(client):
+    """Labor breakdown: rate x hours rounded once half-up; a comparison only, never added into stage_cost_sum."""
+    project = new_project(client, members=["staff", "tyler"], name="Labor")
+    other_project = new_project(client, name="Labor other")
+    pid = project["id"]
+    task = new_task(client, pid, title="Labor task", assignee_id=user_id("staff"))
+    costs = f"/api/projects/{pid}/costs"
+
+    def stage(name, amount, **extra):
+        r = client.post(f"/api/projects/{pid}/stage-costs", headers=H(client, "jon"), json={"stage_name": name, "amount": amount, **extra})
+        assert r.status_code == 201, r.text
+        return r.json()
+
+    build = stage("Build", "1000.00", hourly_rate="10.05", estimated_hours="0.50")
+    rate_only = stage("Rate only", "200.00", hourly_rate="50.00")
+    plain = stage("No labor", "300.00")
+    # 10.05 x 0.50 = 5.025 -> 5.03 (half-up, rounded once); a missing input is null (N/A), not 0.
+    assert build["labor_estimated"] == "5.03" and build["estimated_hours"] == "0.50" and build["hourly_rate"] == "10.05"
+    assert rate_only["labor_estimated"] is None and rate_only["labor_actual"] == "0.00"
+    assert plain["labor_estimated"] is None and plain["labor_actual"] is None and plain["hourly_rate"] is None
+
+    before = client.get(costs, headers=H(client, "jon")).json()
+    assert before["stage_cost_sum"] == "1500.00" and before["sum_label"] == "Total"
+    assert before["labor_estimated_total"] == "5.03" and before["labor_actual_total"] == "0.00" and before["unstaged_hours"] == "0.00"
+
+    # Hours with a stage: 0.50 + 1.25 = 1.75 h x 10.05 = 17.5875 -> 17.59. A running timer is not counted.
+    url = f"/api/projects/{pid}/tasks/{task['id']}/hours"
+    for hours in ("0.50", "1.25"):
+        r = client.post(url, headers=H(client, "staff"), json={"actual_hours": hours, "stage_cost_id": build["id"]})
+        assert r.status_code == 200, r.text
+    assert client.post(url, headers=H(client, "staff"), json={"actual_hours": "2.00"}).status_code == 200  # no stage
+    started = client.post("/api/time-entries/timer/start", headers=H(client, "staff"), json={"task_id": task["id"], "stage_cost_id": build["id"]})
+    assert started.status_code == 201 and started.json()["stage_cost_id"] == build["id"] and started.json()["stage_name"] == "Build"
+
+    after = client.get(costs, headers=H(client, "jon")).json()
+    by_name = {s["stage_name"]: s for s in after["stage_costs"]}
+    assert by_name["Build"]["actual_hours"] == "1.75" and by_name["Build"]["labor_actual"] == "17.59"
+    assert by_name["Rate only"]["actual_hours"] == "0.00" and by_name["No labor"]["labor_actual"] is None
+    assert after["unstaged_hours"] == "2.00"
+    assert after["labor_estimated_total"] == "5.03" and after["labor_actual_total"] == "17.59"
+    # Labor is a comparison only: every cost total is unchanged by rates, hours and labor dollars.
+    assert after["stage_cost_sum"] == before["stage_cost_sum"] == "1500.00"
+    assert after["expense_total"] == before["expense_total"] and after["bid_amount"] == before["bid_amount"]
+
+    # A member sees stage names only (no amounts, rates or hours) and is still refused on /costs (SE-NFR-02).
+    names = client.get(f"/api/projects/{pid}/stages", headers=H(client, "staff"))
+    assert names.status_code == 200
+    assert [row["stage_name"] for row in names.json()] == ["Build", "Rate only", "No labor"]
+    assert all(set(row) == {"id", "stage_name"} for row in names.json())
+    assert client.get(costs, headers=H(client, "staff")).status_code == 403
+    assert client.get(f"/api/projects/{pid}/stages", headers=H(client, "myoram")).status_code == 403  # not a member
+    assert client.post(f"/api/projects/{pid}/stage-costs", headers=H(client, "staff"), json={"stage_name": "x", "amount": "1", "hourly_rate": "1"}).status_code == 403
+
+    # The timer entry shows its stage in the entry list, including for the member who owns it.
+    assert client.post("/api/time-entries/timer/stop", headers=H(client, "staff"), json={}).status_code == 200
+    entries = client.get("/api/time-entries", headers=H(client, "staff"), params={"project_id": pid}).json()
+    assert {e["stage_name"] for e in entries} == {"Build", None}
+
+    # A stage of another project is refused with 422 and nothing is saved.
+    foreign = client.post(f"/api/projects/{other_project['id']}/stage-costs", headers=H(client, "jon"), json={"stage_name": "Foreign", "amount": "1"}).json()
+    count = len(client.get("/api/time-entries", headers=H(client, "staff"), params={"project_id": pid}).json())
+    bad_hours = client.post(url, headers=H(client, "staff"), json={"actual_hours": "1.00", "stage_cost_id": foreign["id"]})
+    bad_timer = client.post("/api/time-entries/timer/start", headers=H(client, "staff"), json={"task_id": task["id"], "stage_cost_id": foreign["id"]})
+    assert bad_hours.status_code == 422 and bad_hours.json()["detail"] == "That stage does not belong to this project"
+    assert bad_timer.status_code == 422 and bad_timer.json()["detail"] == "That stage does not belong to this project"
+    assert len(client.get("/api/time-entries", headers=H(client, "staff"), params={"project_id": pid}).json()) == count
+    assert client.get("/api/time-entries/timer/active", headers=H(client, "staff")).json() is None
+
+    # Clearing a rate (explicit null) and removing a stage: its time entries keep their hours but lose the stage.
+    cleared = client.put(f"/api/projects/{pid}/stage-costs/{build['id']}", headers=H(client, "jon"), json={"hourly_rate": None})
+    assert cleared.status_code == 200 and cleared.json()["hourly_rate"] is None and cleared.json()["labor_actual"] is None
+    assert cleared.json()["estimated_hours"] == "0.50"  # untouched field stays
+    assert client.delete(f"/api/projects/{pid}/stage-costs/{build['id']}", headers=H(client, "jon")).status_code == 204
+    entries = client.get("/api/time-entries", headers=H(client, "staff"), params={"project_id": pid}).json()
+    assert entries and all(e["stage_cost_id"] is None and e["stage_name"] is None for e in entries)
+    final = client.get(costs, headers=H(client, "jon")).json()
+    assert final["unstaged_hours"] == "3.75"  # 0.50 + 1.25 + 2.00 + the stopped timer's rounded 0.00
+
+    # No stage has both inputs -> the totals are null (N/A), not 0.
+    empty = new_project(client, name="Labor empty")
+    client.post(f"/api/projects/{empty['id']}/stage-costs", headers=H(client, "jon"), json={"stage_name": "Only cost", "amount": "10.00"})
+    summary = client.get(f"/api/projects/{empty['id']}/costs", headers=H(client, "jon")).json()
+    assert summary["labor_estimated_total"] is None and summary["labor_actual_total"] is None
+
+
 def test_uc19_member_removal_reassigns_open_tasks_se_fr30(client):
     project = new_project(client, members=["tyler", "staff"], name="Removal")
     pid = project["id"]

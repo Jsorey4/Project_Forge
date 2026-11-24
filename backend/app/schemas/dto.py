@@ -56,6 +56,21 @@ MoneyOut = Annotated[Decimal, PlainSerializer(_money_str, return_type=str)]
 HoursIn = Annotated[Decimal, Field(ge=0, le=Decimal("100000")), AfterValidator(quantize_money)]
 HoursOut = Annotated[Decimal | float | None, PlainSerializer(_hours_float, return_type=float | None)]
 
+
+def _money_str_or_none(value: Decimal | None) -> str | None:
+    return None if value is None else _money_str(value)
+
+
+def _hours_str(value: Decimal | float | None) -> str | None:
+    """Hours that feed labor math travel as exact two-decimal strings (ADR 004), not floats."""
+    if value is None:
+        return None
+    return f"{Decimal(str(value)).quantize(CENT, rounding=ROUND_HALF_UP):.2f}"
+
+
+MoneyOptOut = Annotated[Decimal | None, PlainSerializer(_money_str_or_none, return_type=str | None)]
+HoursStrOut = Annotated[Decimal | float | None, PlainSerializer(_hours_str, return_type=str | None)]
+
 Role = Literal["owner", "manager", "member"]
 ProjectStatus = Literal["planning", "active", "on_hold", "completed", "archived"]
 ProjectType = Literal["work", "school", "personal"]
@@ -783,6 +798,8 @@ class FinancialsUpdate(BaseModel):
 class StageCostCreate(BaseModel):
     stage_name: str = Field(max_length=80)
     amount: MoneyIn
+    hourly_rate: MoneyIn | None = None  # labor comparison only; never added into the stage-cost total
+    estimated_hours: HoursIn | None = None
     notes: str = Field(default="", max_length=2000)
     position: Position | None = None
 
@@ -793,6 +810,8 @@ class StageCostCreate(BaseModel):
 class StageCostUpdate(BaseModel):
     stage_name: str | None = Field(default=None, max_length=80)
     amount: MoneyIn | None = None
+    hourly_rate: MoneyIn | None = None  # send null to clear (see model_fields_set in the router)
+    estimated_hours: HoursIn | None = None
     notes: str | None = Field(default=None, max_length=2000)
     position: Position | None = None
 
@@ -836,6 +855,19 @@ class StageCostOut(ORMModel):
     amount: MoneyOut
     position: int
     notes: str
+    # Labor comparison (UC-01): null means "not set" / "cannot be calculated" and the UI shows N/A.
+    hourly_rate: MoneyOptOut = None
+    estimated_hours: HoursStrOut = None
+    actual_hours: HoursStrOut = "0.00"
+    labor_estimated: MoneyOptOut = None
+    labor_actual: MoneyOptOut = None
+
+
+class StageNameOut(BaseModel):
+    """A stage's name only: what any project member may see when tagging time (no amounts, no rates)."""
+
+    id: str
+    stage_name: str
 
 
 class ExpenseOut(ORMModel):
@@ -861,12 +893,17 @@ class CostSummaryOut(BaseModel):
     expense_total: MoneyOut
     expense_count: int
     categories: list[str]
+    # Labor comparison only: never part of stage_cost_sum or any other total.
+    unstaged_hours: HoursStrOut = "0.00"
+    labor_estimated_total: MoneyOptOut = None
+    labor_actual_total: MoneyOptOut = None
 
 
 class HoursUpdate(BaseModel):
     estimated_hours: HoursIn | None = None
     assigned_hours: HoursIn | None = None
     actual_hours: Annotated[Decimal, Field(gt=0, le=24), AfterValidator(quantize_money)] | None = None
+    stage_cost_id: IdStr | None = None  # the cost stage the logged hours were worked on
     work_date: date | None = None
     note: str = Field(default="", max_length=300)
 
@@ -882,6 +919,7 @@ class TaskHoursOut(BaseModel):
 
 class TimerStart(BaseModel):
     task_id: IdStr
+    stage_cost_id: IdStr | None = None
     note: str = Field(default="", max_length=300)
 
     _note = field_validator("note")(lambda cls, v: clean_single_line(v))
@@ -908,6 +946,8 @@ class TimeEntryOut(BaseModel):
     elapsed_seconds: int
     duration_hours: HoursOut
     note: str
+    stage_cost_id: str | None = None
+    stage_name: str | None = None
 
 
 class PerformanceRow(BaseModel):

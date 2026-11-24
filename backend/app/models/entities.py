@@ -357,6 +357,8 @@ class StageCost(Base):
     __tablename__ = "stage_costs"
     __table_args__ = (
         CheckConstraint("amount >= 0", name="ck_stage_costs_amount"),
+        CheckConstraint("hourly_rate is null or hourly_rate >= 0", name="ck_stage_costs_rate"),
+        CheckConstraint("estimated_hours is null or estimated_hours >= 0", name="ck_stage_costs_est_hours"),
         Index("ix_stage_costs_project_position", "project_id", "position"),
     )
 
@@ -364,6 +366,9 @@ class StageCost(Base):
     project_id: Mapped[str] = mapped_column(GUID(), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
     stage_name: Mapped[str] = mapped_column(String(80), nullable=False)
     amount: Mapped[Decimal] = mapped_column(Money, nullable=False, default=Decimal("0.00"))
+    # Labor comparison only (0003_stage_labor.sql): never added into the stage-cost total.
+    hourly_rate: Mapped[Decimal | None] = mapped_column(Money, nullable=True)
+    estimated_hours: Mapped[Decimal | None] = mapped_column(Hours, nullable=True)
     position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     notes: Mapped[str] = mapped_column(Text, nullable=False, default="")
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False, default=utcnow)
@@ -414,12 +419,14 @@ class TimeEntry(Base):
         Index("ix_time_entries_project_user_started", "project_id", "user_id", "started_at"),
         Index("ix_time_entries_user_ended", "user_id", "ended_at"),
         Index("ix_time_entries_task", "task_id"),
+        Index("ix_time_entries_stage", "stage_cost_id"),  # ON DELETE SET NULL from stage_costs
     )
 
     id: Mapped[str] = mapped_column(GUID(), primary_key=True, default=new_id)
     project_id: Mapped[str] = mapped_column(GUID(), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
     task_id: Mapped[str] = mapped_column(GUID(), ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False)
     user_id: Mapped[str] = mapped_column(GUID(), ForeignKey("user_profiles.id", ondelete="CASCADE"), nullable=False)
+    stage_cost_id: Mapped[str | None] = mapped_column(GUID(), ForeignKey("stage_costs.id", ondelete="SET NULL"), nullable=True)
     source: Mapped[str] = mapped_column(String(10), nullable=False, default="timer")
     started_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
     ended_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)

@@ -4,7 +4,9 @@
  *   floating point, and rounded half-up to the cent - the same rule as the server's Decimal(ROUND_HALF_UP).
  *   calculateStageCostSummary() returns the stage-cost sum labelled "Total" or "Subtotal". Bids, budgets
  *   and expenses are never added to it.
- * @traces SE-NFR-01, SE-FR-01, SE-FR-02, SE-FR-03, UC-01
+ *   The labor-breakdown helpers (over-estimate check, N/A text, totals label, rate / hours input parsing) use the
+ *   same cent math; labor dollars are a comparison and are never added into the stage-cost total.
+ * @traces SE-NFR-01, SE-FR-01, SE-FR-02, SE-FR-03, SE-FR-04, UC-01
  */
 import type { ExpenseCategory } from '../../shared/types';
 
@@ -74,4 +76,66 @@ export function validateExpense(form: ExpenseForm): Record<string, string> {
   if (!isValidAmount(form.amount)) errors.amount = 'Enter an amount of 0 or more, like 125.50';
   if (!/^\d{4}-\d{2}-\d{2}$/.test(form.expense_date)) errors.expense_date = 'Choose a date';
   return errors;
+}
+
+// ---------------------------------------------------------------------------
+// Labor breakdown (comparison only, ADR 004). Values arrive from the server as exact strings; null means
+// "not set" or "cannot be calculated" and is shown as N/A (UC-02 wording).
+// ---------------------------------------------------------------------------
+export interface LaborStage {
+  hourly_rate: string | null;
+  estimated_hours: string | null;
+  actual_hours: string;
+  labor_estimated: string | null;
+  labor_actual: string | null;
+}
+
+export const NOT_AVAILABLE = 'N/A';
+
+/** True when both values exist and the actual labor cost is strictly greater than the estimate. */
+export function isOverEstimate(actual: string | null, estimate: string | null): boolean {
+  if (actual === null || estimate === null) return false;
+  return parseCents(actual) > parseCents(estimate);
+}
+
+/** Hours arrive as two-decimal strings ("12.50"); a missing value is N/A. */
+export function hoursText(value: string | null): string {
+  return value === null ? NOT_AVAILABLE : formatCents(parseCents(value));
+}
+
+/**
+ * Hours and the Total / Subtotal label of the labor card's last row. Estimated hours add up only the stages
+ * that have them; actual hours add every finished hour in the project, including hours with no stage. The row
+ * is a "Subtotal" while any stage lacks a rate or estimated hours, because its dollar totals then leave that
+ * stage out. Hours worked with no stage have no rate, so they never appear in the dollar totals.
+ */
+export function summarizeLabor(stages: LaborStage[], unstagedHours: string): { estimatedHours: string | null; actualHours: string; label: 'Total' | 'Subtotal' } {
+  const est = stages.filter((s) => s.estimated_hours !== null).map((s) => s.estimated_hours as string);
+  const complete = stages.every((s) => s.labor_estimated !== null && s.labor_actual !== null);
+  return {
+    estimatedHours: est.length ? sumAmounts(est) : null,
+    actualHours: sumAmounts([...stages.map((s) => s.actual_hours), unstagedHours]),
+    label: complete ? 'Total' : 'Subtotal',
+  };
+}
+
+export interface LaborInput {
+  hourly_rate: string | null;
+  estimated_hours: string | null;
+}
+
+/** Reads the two inline-edit boxes. Empty clears the value (null); anything else must be 0 or more. */
+export function parseLaborInput(rate: string, hours: string): { value: LaborInput; errors: { hourly_rate?: string; estimated_hours?: string } } {
+  const errors: { hourly_rate?: string; estimated_hours?: string } = {};
+  const read = (raw: string, key: 'hourly_rate' | 'estimated_hours', message: string): string | null => {
+    if (raw.trim() === '') return null;
+    if (!isValidAmount(raw)) {
+      errors[key] = message;
+      return null;
+    }
+    return normalizeAmount(raw);
+  };
+  const hourly_rate = read(rate, 'hourly_rate', 'Enter a rate of 0 or more, like 85.00');
+  const estimated_hours = read(hours, 'estimated_hours', 'Enter hours of 0 or more, like 40');
+  return { value: { hourly_rate, estimated_hours }, errors };
 }

@@ -61,7 +61,7 @@ function HoursCard({ task, onChanged }: { task: TaskDetail; onChanged: () => voi
         ) : null}
         <div className="space-y-2 border-t border-line pt-4">
           <p className="label">Timer</p>
-          <TaskTimerWidget taskId={task.id} taskTitle={task.title} canTrack={canTrack} onStopped={onChanged} />
+          <TaskTimerWidget taskId={task.id} projectId={task.project_id} taskTitle={task.title} canTrack={canTrack} onStopped={onChanged} />
         </div>
         {canTrack ? (
           <div className="space-y-2 border-t border-line pt-4">
