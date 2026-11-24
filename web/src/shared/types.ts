@@ -118,6 +118,36 @@ export interface Member {
   done_task_count: number;
 }
 
+/** One person's overview for the People dialog (GET /api/people/{id}): only projects shared with the caller. */
+export interface PersonProject {
+  id: string;
+  name: string;
+  project_type: ProjectType;
+  status: ProjectStatus;
+  deadline: string;
+  role: Role;
+  task_count: number;
+  open_task_count: number;
+  done_task_count: number;
+}
+
+export interface PersonTask {
+  id: string;
+  project_id: string;
+  project_name: string;
+  title: string;
+  status: TaskStatus;
+  priority: TaskPriority;
+  due_date: string;
+  completed_at: string | null;
+}
+
+export interface PersonOverview {
+  user: { id: string; username: string; display_name: string; email: string; avatar_url: string | null };
+  projects: PersonProject[];
+  tasks: PersonTask[];
+}
+
 export interface Project {
   id: string;
   name: string;
