@@ -7,6 +7,7 @@
  */
 import { useState } from 'react';
 import type { Member } from '../../shared/types';
+import { Select } from '../../components/Select';
 import { Alert, Avatar, Modal, RetryBanner } from '../../shared/ui';
 import { useSave } from '../../shared/useSave';
 import { memberController } from './memberController';
@@ -59,13 +60,10 @@ export function ReassignTasksModal({ open, projectId, member, members, onClose, 
           </div>
         </div>
         {member.open_task_count > 0 ? (
-          <label className="block">
-            <span className="label">Reassign their open tasks to</span>
-            <select className="input" value={target} onChange={(e) => setTarget(e.target.value)}>
-              <option value="">Leave unassigned</option>
-              {candidates.map((m) => <option key={m.user_id} value={m.user_id}>{m.display_name} (@{m.username})</option>)}
-            </select>
-          </label>
+          <div className="block">
+            <label className="label" htmlFor="reassign-target">Reassign their open tasks to</label>
+            <Select id="reassign-target" value={target} onChange={setTarget} options={[{ value: '', label: 'Leave unassigned' }, ...candidates.map((m) => ({ value: m.user_id, label: `${m.display_name} (@${m.username})` }))]} />
+          </div>
         ) : (
           <p className="text-sm text-muted">They have no open tasks, so nothing needs to be reassigned.</p>
         )}

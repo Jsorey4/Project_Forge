@@ -21,6 +21,7 @@ import { ApiError } from '../services/apiClient';
 import { useRealtime } from '../services/realtimeClient';
 import type { ProjectDetail, Task, TaskStatus } from '../shared/types';
 import { formatDate, formatDateTime } from '../shared/format';
+import { Select } from '../components/Select';
 import { Alert, Avatar, EmptyState, Icon, ModeBadge, PageHeader, PriorityBadge, RetryBanner, Spinner, StatusBadge } from '../shared/ui';
 import { toApiError } from '../shared/useSave';
 
@@ -205,20 +206,9 @@ export function BoardPage() {
           <Icon name="search" className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
           <input className="input pl-10" placeholder="Search tasks" value={filters.search} onChange={(e) => setFilters({ ...filters, search: e.target.value })} aria-label="Search tasks" />
         </div>
-        <select className="input w-auto" value={filters.assignee} onChange={(e) => setFilters({ ...filters, assignee: e.target.value })} aria-label="Filter by assignee">
-          <option value="all">Everyone</option>
-          <option value="me">Assigned to me</option>
-          <option value="none">Unassigned</option>
-          {project.members.map((m) => <option key={m.user_id} value={m.user_id}>{m.display_name}</option>)}
-        </select>
-        <select className="input w-auto" value={filters.listId} onChange={(e) => setFilters({ ...filters, listId: e.target.value })} aria-label="Filter by feature list">
-          <option value="">All lists</option>
-          {project.lists.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
-        </select>
-        <select className="input w-auto" value={filters.tag} onChange={(e) => setFilters({ ...filters, tag: e.target.value })} aria-label="Filter by tag">
-          <option value="">All tags</option>
-          {tags.map((t) => <option key={t} value={t}>#{t}</option>)}
-        </select>
+        <Select className="w-auto" value={filters.assignee} onChange={(v) => setFilters({ ...filters, assignee: v })} ariaLabel="Filter by assignee" options={[{ value: 'all', label: 'Everyone' }, { value: 'me', label: 'Assigned to me' }, { value: 'none', label: 'Unassigned' }, ...project.members.map((m) => ({ value: m.user_id, label: m.display_name }))]} />
+        <Select className="w-auto" value={filters.listId} onChange={(v) => setFilters({ ...filters, listId: v })} ariaLabel="Filter by feature list" options={[{ value: '', label: 'All lists' }, ...project.lists.map((l) => ({ value: l.id, label: l.name }))]} />
+        <Select className="w-auto" value={filters.tag} onChange={(v) => setFilters({ ...filters, tag: v })} ariaLabel="Filter by tag" options={[{ value: '', label: 'All tags' }, ...tags.map((t) => ({ value: t, label: `#${t}` }))]} />
       </div>
       <div className="mb-4 space-y-3 empty:hidden">
         {error ? <Alert onClose={() => setError(null)}>{error} The card was moved back.</Alert> : null}

@@ -7,6 +7,7 @@
 import { useState } from 'react';
 import type { Member, Role } from '../../shared/types';
 import { ROLE_LABEL, grantableRoles } from '../../shared/permissions';
+import { Select } from '../../components/Select';
 import { Alert, Field, Modal, RetryBanner } from '../../shared/ui';
 import { useSave } from '../../shared/useSave';
 import { memberController } from './memberController';
@@ -38,9 +39,7 @@ export function InviteMemberModal({ open, projectId, callerRole, onClose, onInvi
           <input id="inv-id" className="input" value={identifier} onChange={(e) => setIdentifier(e.target.value)} placeholder="preethi or preethi@example.com" />
         </Field>
         <Field label="Role" htmlFor="inv-role">
-          <select id="inv-role" className="input" value={role} onChange={(e) => setRole(e.target.value as Role)}>
-            {grantableRoles(callerRole).map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
-          </select>
+          <Select id="inv-role" value={role} onChange={(v) => setRole(v as Role)} options={grantableRoles(callerRole).map((r) => ({ value: r, label: ROLE_LABEL[r] }))} />
         </Field>
       </div>
     </Modal>

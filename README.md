@@ -349,6 +349,7 @@ CS3354_Team3_Project/
 │       ├── main.tsx               # Application entry point
 │       ├── index.css              # Tailwind layers, light/dark themes, color-blindness palettes
 │       ├── app/                   # Router and route guards, layout shell, theme provider
+│       ├── components/            # Shared UI components: Select (custom drop-down), Checkbox
 │       ├── pages/                 # One file per screen; assembles feature components
 │       ├── features/              # One folder per module (see below)
 │       ├── services/              # apiClient.ts (REST), realtimeClient.ts (WebSocket), and their tests
@@ -372,7 +373,7 @@ CS3354_Team3_Project/
     └── seed.sql                   # Fake development data only
 ```
 
-The web app and backend were built without some of the folders planned earlier: `web/src/components/`, `web/src/styles/`, `web/e2e/`, `supabase/config.toml`, and `supabase/functions/`. Add `web/src/components/` when shared components are introduced (for example, the shared dropdown and checkbox ported from Preethi's frontend). Edge Functions are not used.
+The web app and backend were built without some of the folders planned earlier: `web/src/styles/`, `web/e2e/`, `supabase/config.toml`, and `supabase/functions/`. Edge Functions are not used. `web/src/components/` now holds the shared `Select` and `Checkbox` (UI ideas ported from Preethi's frontend); use them instead of the native `<select>` and `type="checkbox"`.
 
 ### Pages
 

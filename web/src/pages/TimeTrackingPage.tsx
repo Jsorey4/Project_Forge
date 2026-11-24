@@ -19,6 +19,8 @@ import { useRealtime } from '../services/realtimeClient';
 import { isManager } from '../shared/permissions';
 import type { SpreadsheetSection, Task, TimeEntry } from '../shared/types';
 import { formatDateTime, formatDuration, formatHours, todayIso } from '../shared/format';
+import { Select } from '../components/Select';
+import { Checkbox } from '../components/Checkbox';
 import { Alert, Badge, Card, EmptyState, Field, Icon, Modal, PageHeader, RetryBanner, Segmented, Spinner } from '../shared/ui';
 import { toApiError, useSave } from '../shared/useSave';
 
@@ -81,19 +83,16 @@ function ExportCard() {
   return (
     <Card title="Export" className="flex flex-col" bodyClass="flex flex-1 flex-col">
       <label className="text-[13px] font-semibold text-muted" htmlFor="ex-project">Project</label>
-      <select id="ex-project" className="input mt-2" value={projectId} onChange={(e) => setProjectId(e.target.value)}>
-        {projects.map((p) => <option key={p.id} value={p.id}>Project: {p.name}</option>)}
-      </select>
+      <Select id="ex-project" className="mt-2" value={projectId} onChange={setProjectId} options={projects.map((p) => ({ value: p.id, label: `Project: ${p.name}` }))} />
       <p className="mt-4 text-[13px] font-semibold text-muted">Include</p>
       <div className="mt-3 flex flex-col gap-3.5">
         {([['project', 'Project info'], ['time', 'Time records'], ['cost', 'Cost summary']] as [Include, string][]).map(([key, label]) => {
           const locked = key === 'cost' && !canCost;
           return (
-            <label key={key} className={`flex items-center gap-3 text-[15px] text-ink ${locked ? 'opacity-60' : ''}`}>
-              <input type="checkbox" className="h-5 w-5" disabled={locked} checked={!locked && include[key]} onChange={(e) => setInclude({ ...include, [key]: e.target.checked })} />
-              {label}
+            <div key={key} className="flex items-center gap-3 text-[15px] text-ink">
+              <Checkbox label={label} disabled={locked} checked={!locked && include[key]} onChange={(v) => setInclude({ ...include, [key]: v })} />
               {locked ? <span className="ml-auto flex items-center gap-1 text-xs text-muted"><Icon name="lock" className="h-3 w-3" /> Managers only</span> : null}
-            </label>
+            </div>
           );
         })}
       </div>
@@ -181,9 +180,7 @@ export function TimeTrackingPage() {
             <EmptyState icon="clock" title="No open tasks assigned to you">When a manager assigns you a task, you can time it here.</EmptyState>
           ) : (
             <>
-              <select className="input" value={taskId} onChange={(e) => setTaskId(e.target.value)} aria-label="Task to time" disabled={!!running}>
-                {myTasks.map((t) => <option key={t.id} value={t.id}>{t.title}</option>)}
-              </select>
+              <Select value={taskId} onChange={setTaskId} ariaLabel="Task to time" disabled={!!running} options={myTasks.map((t) => ({ value: t.id, label: t.title }))} />
               {selected ? (
                 <div className="mt-10">
                   <TaskTimerWidget variant="hero" taskId={selected.id} taskTitle={selected.title} projectName={`Est ${formatHours(selected.estimated_hours)} · Actual ${formatHours(selected.actual_hours)}`} canTrack onStopped={() => void loadEntries()} onActiveChange={onActiveChange} />
@@ -253,9 +250,7 @@ export function TimeTrackingPage() {
           <RetryBanner error={log.networkError} onRetry={log.retry} onCancel={log.cancel} busy={log.saving} />
           {log.error ? <Alert>{log.error.detail}</Alert> : null}
           <Field label="Task" htmlFor="me-task">
-            <select id="me-task" className="input" value={manualTask} onChange={(e) => setManualTask(e.target.value)}>
-              {(myTasks ?? []).map((t) => <option key={t.id} value={t.id}>{t.title}</option>)}
-            </select>
+            <Select id="me-task" value={manualTask} onChange={setManualTask} options={(myTasks ?? []).map((t) => ({ value: t.id, label: t.title }))} />
           </Field>
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Hours" htmlFor="me-hours" hint="0.25 to 24"><input id="me-hours" className="input" type="number" min={0.25} max={24} step="0.25" value={hours} onChange={(e) => setHours(e.target.value)} /></Field>
