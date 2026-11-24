@@ -65,7 +65,7 @@ Each teammate authored one requirement area in the SE Document and owns the matc
 | Budgets, costs, and reporting | Jon Sorey | SE-FR-01–05, SE-NFR-01–02 | UC-01–04 | `costs/`, `time-tracking/`, `reports/` | `costs.py`, `time_tracking.py`, `reports.py` |
 | Soft deadlines | Preethi Seereddy | SE-FR-06–10, SE-NFR-03–04 | UC-05–07 | `soft-deadlines/` | `soft_deadlines.py` |
 | Accounts and user preferences | Tyler Gaines | SE-FR-11–15, SE-NFR-05–06 | UC-08–11 | `auth/`, `settings/` | `auth.py`, `settings.py` |
-| Project organization and sharing | Saaqib Shaik | SE-FR-16–20, SE-NFR-09–10 | UC-12–15 | `projects/`, `export/` | `projects.py`, `exports.py` |
+| Project organization and sharing | Saaqib Shaik | SE-FR-16–20, SE-NFR-09–10 | UC-12–15 | `projects/`, `export/`, `calendar/` | `projects.py`, `exports.py` |
 | Dashboard widgets | Myoram Langwang | SE-FR-21–25, SE-NFR-07–08 | UC-16–17 | `dashboard/` | `dashboard.py` |
 | Tasks and team collaboration | Aashwat Singh | SE-FR-26–30, SE-NFR-11–12 | UC-18–22 | `tasks/`, `members/`, `collaboration/` | `tasks.py`, `members.py`, `collaboration.py` |
 
@@ -282,7 +282,7 @@ The Logical, Physical, and Development views in `docs/ProjectForge System Archit
 - **Tasks/Charts:** view all, create/edit, soft deadlines, task priority, progress charts
 - **Costs:** overview, details, export to Excel
 - **People:** team members, assign tasks, user permissions
-- **Calendar:** calendar view, due dates, export to calendar
+- **Calendar:** calendar view (Month, Week and Day; Week and Day are an hour-by-hour grid), due dates, export to calendar
 - **Profile/Settings:** account info, edit profile, settings, dark/light mode
 
 The wireframes add Create account, Reset password, Notifications, and Time tracking & export screens. Wireframes show layout only; they do not add scope.
@@ -407,6 +407,7 @@ web/src/features/
 ├── settings/        # Tyler   — profile, avatar, theme, color-blindness, project-type mode
 ├── projects/        # Saaqib  — project details, status, cards, progress
 ├── export/          # Saaqib  — calendar (.ics, Google, Outlook) and spreadsheet (.xlsx, Sheets) export
+├── calendar/        # Saaqib  — Month, Week and Day views: hour grid, overlap layout, event chips
 ├── dashboard/       # Myoram  — widgets, layout, overlap check, restore default
 ├── tasks/           # Aashwat — tasks, lists, tags, ordering, assignment
 ├── members/         # Aashwat — invitations, membership, roles
