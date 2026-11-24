@@ -1,6 +1,6 @@
 # ADR 001: FastAPI backend on top of the Supabase PostgreSQL schema
 
-- **Status:** Proposed. Needs team sign-off (the team README's working rule is "Supabase only").
+- **Status:** Accepted by the team on 2026-11-24 (Option A: keep FastAPI). The team README's Architecture section and "Backend technology" row were updated to match.
 - **Owner:** Aashwat Singh (integration). Affects every area.
 - **Traces:** SE-NFR-02, SE-NFR-06, SE-NFR-11; team README "Backend technology" open decision.
 

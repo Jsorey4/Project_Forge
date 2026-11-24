@@ -20,9 +20,9 @@ This README is the single shared brief for every teammate working in this reposi
 1. **Source authority.** The SE Document's functional and nonfunctional requirement lists define scope. This README turns them into implementation rules using the document's diagrams. If this README and the SE Document disagree, stop and raise it with the team; do not choose silently.
 2. **Build only traceable behavior.** Every feature must trace to an `SE-FR-xx`, `SE-NFR-xx`, or `UC-xx` defined below. Where sources conflict, follow the working rule in [Open decisions](#open-decisions-and-source-conflicts). Anything not listed here is out of scope, including the AI assistant mentioned in one wireframe, two-way calendar synchronization, general email scheduling, and the `templates`/`pages` prototype tables.
 3. **Ask instead of guessing.** If a needed detail is missing (a field, permission, formula, or message), ask the area owner or the team, or propose a decision in `docs/decisions/` and link it in the pull request. Never invent behavior that another teammate's code will depend on.
-4. **Stay in your area.** Each requirement area has an owner (see [Ownership](#requirement-areas-and-ownership)). Work in your own feature folders. Call out any change to shared code in the pull request description: `web/src/app/`, `web/src/shared/`, `web/src/services/`, `supabase/migrations/`, CI configuration, or this README.
-5. **Authorization lives on the server.** Enforce every permission rule with PostgreSQL Row Level Security (RLS) or an Edge Function. The UI may hide controls for usability, but it is never the only check.
-6. **No secrets in Git.** Commit `.env.example` with variable names only. Never commit `.env`, Supabase service-role keys, OAuth client secrets, or real user data.
+4. **Stay in your area.** Each requirement area has an owner (see [Ownership](#requirement-areas-and-ownership)). Work in your own feature folders. Call out any change to shared code in the pull request description: `web/src/app/`, `web/src/shared/`, `web/src/services/`, `backend/app/core/`, `backend/app/main.py`, `backend/app/schemas/dto.py`, `backend/app/models/entities.py`, `supabase/migrations/`, CI configuration, or this README.
+5. **Authorization lives on the server.** Enforce every permission rule in the FastAPI backend through `require_project_role()` in `backend/app/core/permissions.py`, and mirror it in PostgreSQL Row Level Security (RLS) as a second check. The UI may hide controls for usability, but it is never the only check.
+6. **No secrets in Git.** Commit `.env.example` with variable names only. Never commit `.env`, `backend/.dev_jwt_secret`, database passwords or connection strings, Supabase service-role keys, OAuth client secrets, or real user data.
 7. **Branch and review.** Never commit directly to `main`. Branch from the latest `main` using `<name>/<area>-<short-topic>` (for example, `tyler/auth-login`), open a pull request, get at least one teammate's review, then merge. Keep each pull request to one area and one purpose.
 8. **Keep this file accurate.** Update this README in the same pull request that changes behavior, structure, setup, or a decision. Describe planned work as planned; state that something works only after it has been run.
 
@@ -30,32 +30,46 @@ This README is the single shared brief for every teammate working in this reposi
 
 ## Current repository status
 
-As of this revision, the repository contains documentation and design assets only. There is **no application code, package manifest, database migration, automated test, CI workflow, or verified run command**. Everything under [Architecture](#architecture) and [Repository layout](#repository-layout) is the agreed target, not existing code.
+As of this revision, the repository contains a working full-stack MVP: a React web app, a FastAPI backend, PostgreSQL migrations, and automated tests. There is **no CI workflow and no deployment yet**. The run and test commands in [Setup](#setup) have been run; their results are recorded there.
 
 | Path | Contents |
 | --- | --- |
 | `README.md` | This brief. |
 | `AGENTS.md`, `CLAUDE.md` | Pointers that make AI coding agents load this README automatically. Put rules in this README, not in those files. |
 | `LICENSE` | Repository license. |
-| `docs/ProjectForge System Architecture.pdf` | Logical, Physical, and Development views (the same views as the SE Document). |
+| `web/` | React + TypeScript single-page application (Vite, Tailwind CSS). |
+| `backend/` | FastAPI application server: one router per requirement area, shared security and permission code, tests. |
+| `supabase/migrations/`, `supabase/seed.sql` | PostgreSQL schema, RLS policies, and triggers (the database source of truth), plus demo seed data. |
+| `docs/decisions/` | Architecture decision records (ADR 001–004). |
+| `docs/fullstack-mvp/TEAM_HANDOFF.md` | Per-area file guide, demo script, and known limits for the MVP. |
+| `docs/frontend-comparison.md` | Review of the two candidate frontends and the bugs found in this MVP. |
+| `docs/ProjectForge System Architecture.pdf` | Logical, Physical, and Development views (the same views as the SE Document). These predate the FastAPI decision. |
 | `docs/jon-diagrams/` | Editable draw.io sources for Jon's cost and performance use-case and sequence diagrams. |
-| `docs/SupabaseScreenshot.png` | Table diagram of the **prototype** schema in the hosted Supabase project (see [Data model](#data-model)). |
+| `docs/SupabaseScreenshot.png` | Table diagram of the old **prototype** schema in the hosted Supabase project. Superseded by `supabase/migrations/`. |
 | `docs/ForgeLogo.png` | Project logo. |
 
-The hosted Supabase project contains prototype tables that are not captured as migrations in this repository. Do not build on them until they are exported to `supabase/migrations/` and reconciled with the [Data model](#data-model).
+**Known gaps** (details and file references in `docs/frontend-comparison.md` and the handoff's "Known limits"):
+
+- Layout breaks at some widths: the task-page timer row (1024–1280 px, and at 1440 px while running), the Cost "Add expense" row (768–1099 px), and the 2FA code boxes.
+- 2FA is optional per account; SE-FR-11 requires it.
+- Invitations add an existing user directly; there is no accept step (UC-19).
+- Calendar and Sheets exports build links or payloads; no Google or Microsoft account is connected. Email goes to an in-app development outbox, not SMTP.
+- Deadline reminders are created when a user loads notifications or the dashboard, not by a scheduled job (UC-22).
 
 ## Requirement areas and ownership
 
 Each teammate authored one requirement area in the SE Document and owns the matching code. Owners review pull requests that touch their folders.
 
-| Area | Owner | Requirements | Use cases | Feature folders (`web/src/features/`) |
-| --- | --- | --- | --- | --- |
-| Budgets, costs, and reporting | Jon Sorey | SE-FR-01–05, SE-NFR-01–02 | UC-01–04 | `costs/`, `time-tracking/`, `reports/` |
-| Soft deadlines | Preethi Seereddy | SE-FR-06–10, SE-NFR-03–04 | UC-05–07 | `soft-deadlines/` |
-| Accounts and user preferences | Tyler Gaines | SE-FR-11–15, SE-NFR-05–06 | UC-08–11 | `auth/`, `settings/` |
-| Project organization and sharing | Saaqib Shaik | SE-FR-16–20, SE-NFR-09–10 | UC-12–15 | `projects/`, `export/` |
-| Dashboard widgets | Myoram Langwang | SE-FR-21–25, SE-NFR-07–08 | UC-16–17 | `dashboard/` |
-| Tasks and team collaboration | Aashwat Singh | SE-FR-26–30, SE-NFR-11–12 | UC-18–22 | `tasks/`, `members/`, `collaboration/` |
+| Area | Owner | Requirements | Use cases | Feature folders (`web/src/features/`) | Backend routers (`backend/app/routers/`) |
+| --- | --- | --- | --- | --- | --- |
+| Budgets, costs, and reporting | Jon Sorey | SE-FR-01–05, SE-NFR-01–02 | UC-01–04 | `costs/`, `time-tracking/`, `reports/` | `costs.py`, `time_tracking.py`, `reports.py` |
+| Soft deadlines | Preethi Seereddy | SE-FR-06–10, SE-NFR-03–04 | UC-05–07 | `soft-deadlines/` | `soft_deadlines.py` |
+| Accounts and user preferences | Tyler Gaines | SE-FR-11–15, SE-NFR-05–06 | UC-08–11 | `auth/`, `settings/` | `auth.py`, `settings.py` |
+| Project organization and sharing | Saaqib Shaik | SE-FR-16–20, SE-NFR-09–10 | UC-12–15 | `projects/`, `export/` | `projects.py`, `exports.py` |
+| Dashboard widgets | Myoram Langwang | SE-FR-21–25, SE-NFR-07–08 | UC-16–17 | `dashboard/` | `dashboard.py` |
+| Tasks and team collaboration | Aashwat Singh | SE-FR-26–30, SE-NFR-11–12 | UC-18–22 | `tasks/`, `members/`, `collaboration/` | `tasks.py`, `members.py`, `collaboration.py` |
+
+Shared backend modules in `backend/app/core/` also have primary maintainers: Tyler for `security.py` and `config.py`, and Aashwat for `permissions.py`. `realtime.py` and `sanitizer.py` are shared by Saaqib and Aashwat. See `docs/fullstack-mvp/TEAM_HANDOFF.md` for each area's files and tests.
 
 Two sequence diagrams were drawn outside the author's own area: Preethi drew SEQ "Reset a forgotten password" (Tyler's area) and SEQ "Track time and export records" (Jon's and Saaqib's areas). Agree who implements each of these before starting.
 
@@ -156,7 +170,7 @@ Use these IDs in code headers, tests, and pull requests. The Diagrams column lis
 
 ## Workflow and access rules
 
-Implement these rules together with the requirements. "Server" means an RLS policy or an Edge Function.
+Implement these rules together with the requirements. "Server" means the FastAPI backend, with the matching RLS policy or trigger in `supabase/migrations/` as the second check.
 
 | Use case | Rules and outcomes | Source |
 | --- | --- | --- |
@@ -164,7 +178,7 @@ Implement these rules together with the requirements. "Server" means an RLS poli
 | UC-02 Review project performance | Check report access first. Resolve permitted projects, people, and fields before retrieving data. Validate the selected period. Managers see authorized team or individual hours; staff see only their own. Report estimated, assigned, and actual hours separately for the period. No matching records → empty report. Missing input or undefined metric → **N/A**. Load failure → retry or cancel. Out-of-scope requests are denied and change no data. | EX, SEQ "Review project performance" (Jon) |
 | UC-04 Track time | Start or stop a timer on a task and persist its start, end, and duration. Duration is end time minus start time, excluding paused intervals. After saving, update the timer and the recent time records. | SEQ "Track time and export records" (Preethi) |
 | UC-05, UC-06 Create or edit a soft deadline | Select a task that has a final due date and enter the soft deadline's date, time, and priority. The soft deadline must be earlier than the final due date. An invalid date shows an error and asks for a new date (create) or keeps the original value (edit). Save within **5 seconds**; otherwise retry and warn the user. Display the saved date and priority. | HL, EX (Preethi); SE-NFR-04 |
-| UC-08 Create account | Rate-limit sign-up per IP address ("try again later"). Validate username, email, and password format, password strength, and uniqueness, and show field errors. Store the password only through Supabase Auth (hashed), assign the default role, confirm registration, and redirect to log in. | HL, EX, SEQ (Tyler) |
+| UC-08 Create account | Rate-limit sign-up per IP address ("try again later"). Validate username, email, and password format, password strength, and uniqueness, and show field errors. Store the password only as a bcrypt hash (in the backend's `user_profiles` table, never readable by other users), assign the default role, confirm registration, and redirect to log in. | HL, EX, SEQ (Tyler) |
 | UC-09 Log in | Refuse a locked account before checking the password. Rate-limit attempts per IP address. Wrong credentials show a generic error and increment the failed-attempt count; at the limit, lock the account. Success resets the count, starts a secure session, and redirects. Require MFA (SE-FR-11; the sitemap has a 2FA step) even though the Log in diagrams omit it. | HL, EX, SEQ (Tyler); sitemap |
 | UC-10 Unlock account | The diagrams disagree on who unlocks an account. See [Open decisions](#open-decisions-and-source-conflicts). | UC (Tyler); Logical and Physical views |
 | UC-11 Reset a forgotten password | Show the same "check your inbox" message whether or not the email has an account. Send a single-use, expiring reset link only for existing accounts. A valid link and acceptable password confirm success and return to log in; an expired link or weak password shows an error and offers a new link. Password reset is separate from account unlocking. | SEQ (Preethi) |
@@ -190,7 +204,7 @@ Role names differ across diagrams, and no permission matrix has been approved ye
 - SEQ "Create project" (Saaqib) makes the creator the project manager and stores them as the owner (`owner = manager`).
 - Account unlocking (Tyler) uses an application **administrator**, which is not a project role.
 
-**Proposed working matrix (needs team sign-off).** Use it so features agree with each other. It maps manager/partner to owner or manager, and staff to member.
+**Proposed working matrix (needs team sign-off; see `docs/decisions/002-rbac-permission-matrix.md`).** Use it so features agree with each other. It maps manager/partner to owner or manager, and staff to member.
 
 | Action | Owner | Manager | Member |
 | --- | --- | --- | --- |
@@ -208,7 +222,13 @@ Role names differ across diagrams, and no permission matrix has been approved ye
 | View performance reports | Team and individuals | Team and individuals | Own only |
 | Export data | Only data the role can view | Only data the role can view | Only data the role can view |
 
-**Implement every role check through one shared helper**, so the matrix can change in one place: a SQL function used by RLS policies (for example, `has_project_role(project_id, roles)`) and a matching TypeScript helper in `web/src/shared/permissions.ts` used only to show or hide UI. Do not write inline role checks inside features.
+**Implement every role check through one shared helper per layer**, so the matrix can change in one place:
+
+- **Backend (authoritative):** `require_project_role()` in `backend/app/core/permissions.py`, called before every read or write.
+- **Database (second lock):** `app_project_role()` in `supabase/migrations/`, used by the RLS policies and guard triggers.
+- **Web (display only):** `web/src/shared/permissions.ts`, used only to show or hide UI.
+
+Do not write inline role checks inside routers or features.
 
 ## Nonfunctional requirements
 
@@ -231,20 +251,30 @@ The SE Document lists **12 nonfunctional requirements**. `SE-NFR-xx` follows the
 
 ## Architecture
 
-Source: Logical, Physical, and Development views (`docs/ProjectForge System Architecture.pdf`) and the layered Architecture Diagram (Saaqib). Boxes describe intended components, not provisioned services.
+**Decision (team, 2026-11-24): FastAPI stays as the application server.** PostgreSQL, hosted on Supabase in production, stays the database and the schema's source of truth. See `docs/decisions/001-hybrid-fastapi-supabase-architecture.md`.
+
+The Logical, Physical, and Development views in `docs/ProjectForge System Architecture.pdf` and the layered Architecture Diagram (Saaqib) were drawn for a Supabase-only design. Where they show Supabase Auth, PostgREST, Realtime, Storage, or Edge Functions, the FastAPI backend now provides that role. The diagrams need redrawing to match.
 
 | Layer | Technology and responsibility |
 | --- | --- |
-| Presentation | **React single-page application (TypeScript) with `supabase-js`**, built as static HTML/JS/CSS and served by **Vercel**. Screens follow the sitemap below. |
-| Application | One feature module per area in `web/src/features/`, plus `web/src/services/` for the shared Supabase client, Realtime channels, and Storage links. |
-| Services | **Supabase Cloud**: API gateway (Kong; checks the JWT on every call), **Auth** (sessions, JWT, MFA), **PostgREST** (REST CRUD), **Realtime** (WebSocket push of progress, task, comment, and notification changes), **Storage** (export files served by signed link), and **Edge Functions** (Deno): `auth-guard` (lockout and unlock), `export-excel`, `export-sheets`, `export-calendar`, and `deadline-notifier`. |
-| Data | **PostgreSQL** with **RLS on every table** (project-role checks), triggers, and `pg_cron` scheduled jobs. Daily backups and a read replica are optional. |
-| Integrations | Google OAuth 2.0 (consent and access tokens), Google Calendar API, Outlook through Microsoft Graph, downloadable iCal `.ics` files, Google Sheets API, and SMTP email for unlock links and deadline reminders. |
-| Build and delivery | GitHub → GitHub Actions (lint, test, and build on every pull request) → web deployed to Vercel; database and functions deployed with the Supabase CLI. |
+| Presentation | **React single-page application (TypeScript, Vite, Tailwind CSS)** in `web/`. Screens follow the sitemap below. In development, Vite serves it on port 5173 and forwards `/api` and `/ws` to the backend. After `npm run build`, the backend can also serve the built files. |
+| Application (web) | One feature module per area in `web/src/features/` (UI, controllers, validation). `web/src/services/` holds the only network code: `apiClient.ts` (REST calls with timeouts and retry-safe saves) and `realtimeClient.ts` (the live-update WebSocket). |
+| Application server | **FastAPI** in `backend/app/`: one router per area in `routers/`, request and response shapes in `schemas/dto.py`, tables in `models/entities.py`. `core/` provides sign-in (bcrypt passwords, signed JWT sessions, TOTP 2FA, lockout, rate limits), permission checks (`permissions.py`), the live-update hub (`realtime.py`, one WebSocket at `/ws`), Markdown and spreadsheet sanitizing (`sanitizer.py`), HTTPS and security headers, and a development email outbox. Exports (`.ics`, `.xlsx`) are generated here. |
+| Data | **PostgreSQL** with **RLS on every table**, guard triggers, and indexes, all created by `supabase/migrations/`. The backend connects with a server role and enforces permissions itself; RLS and triggers hold the same rules for anyone reaching the database directly. Without `DATABASE_URL`, the backend uses a local **SQLite** file for demos and tests. SQLite has no RLS, so production must use PostgreSQL. |
+| Integrations | Downloadable iCal `.ics` files and `.xlsx` workbooks. Google Calendar and Outlook export currently build per-event "add to calendar" links, and Google Sheets export builds a values payload; no Google or Microsoft account is connected yet. SMTP email for unlock links and deadline reminders is planned; the development outbox stands in for it. |
+| Build and delivery | *Planned:* GitHub Actions running backend tests, web tests, and the web build on every pull request, and a hosting choice for the backend and web app. Neither exists yet. |
 
-**Layer rule (Development view):** each layer uses only the layer below it plus `shared/`. Pages use features; features use services; services call Supabase. Pages never call Supabase directly, and features never import pages.
+**Layer rule:** each layer uses only the layer below it plus `shared/`.
 
-**Backend:** use Supabase only. Tyler's SEQ "Log in" and "Create account" show a "Django app", which conflicts with every architecture view. Do not add a Django or other second backend; those two diagrams should be redrawn against Supabase Auth.
+- **Web:** pages use features, features use services, and services call the FastAPI API. The browser never talks to the database directly, and features never import pages.
+- **Backend:** routers use `core/`, `schemas/`, and `models/`. Every database read or write checks the caller's current project role first.
+
+**Schema changes** go in a **new** file in `supabase/migrations/` and in `backend/app/models/entities.py` in the same pull request. Both the SQLite and PostgreSQL test runs must pass.
+
+**Diagrams to redraw:**
+
+- Tyler's SEQ "Log in" and "Create account" show a "Django app". Redraw them against the FastAPI backend (`routers/auth.py`). Do not add Django.
+- The architecture views should show FastAPI between the web app and PostgreSQL.
 
 **Sitemap:** Landing page → Sign up / Sign in → 2FA → Home/Dashboard, which links to:
 
@@ -265,26 +295,29 @@ The wireframes add Create account, Reset password, Notifications, and Time track
 - Compositions (the part is deleted with its whole): User ◆ Dashboard, Dashboard ◆ Widget, Project ◆ TaskList, TaskList ◆ Task, Task ◆ Comment.
 - Operations to implement: `Membership.canAssignTasks()`, `Widget.overlaps(other)`, `Widget.moveTo(x, y)`, `Widget.hide()`, `Dashboard.restoreDefault()`, `Task.assignTo(member)`, `Task.moveTo(list, position)`, `User.unlockAccount(token)`, `ExportJob.generateFile()`, `ExportJob.sendToSheets()`.
 
-**Prototype schema (hosted Supabase project, `docs/SupabaseScreenshot.png`).** Reconcile it with the class diagram before writing migrations:
+**Current schema (`supabase/migrations/0001_initial_schema.sql`, `0002_security_hardening.sql`).** It has 13 tables. `backend/app/models/entities.py` describes the same tables.
 
-| Class | Prototype table | Action needed |
+| Class | Table | Notes |
 | --- | --- | --- |
-| User | `profiles` (references `auth.users`) | Keep. Supabase Auth owns credentials; `profiles` holds username, display name, and avatar. |
-| Membership | `project_members` | Keep. The `project_role` values must include `owner`. |
-| Project | `projects` | Add status and deadline (SE-FR-16). |
-| TaskList | `lists` | Keep. `TaskList` is the class name for this table. |
-| Task | `tasks` | Keep (already has status, priority, assignee, due date, position, completed time). |
-| Tag, Comment, Notification, Dashboard, Widget, ExportJob | — | Create. |
-| — | `time_entries`, `expenses` | Keep. Required by SE-FR-02 and SE-FR-04 but missing from the class diagram. |
-| — | `events` | No requirement defines stored calendar events. Decide or drop. |
-| — | `templates`, `pages` | No requirement. Out of scope unless the team decides otherwise. |
-| — | `Login Page`, `Sidebar` | **Drop.** Never store passwords in an application table; Supabase Auth handles credentials. UI structure is not data. |
+| User | `user_profiles` | Username, display name, avatar, and preferences (theme, color-blindness mode, default project type, notification preferences, calendar consent). It also holds the bcrypt password hash and TOTP secret, which RLS hides from every other user. |
+| Membership | `project_members` | Role is `owner`, `manager`, or `member`. Triggers block self-promotion and removing the last owner. Card color and order are stored per member. |
+| Project | `projects` | Includes status and deadline. |
+| TaskList | `task_lists` | Feature lists inside a project. |
+| Task, Tag | `tasks` | Tags are a JSON list on the task. Also includes estimated and assigned hours. |
+| Comment, Notification | `comments`, `notifications` | |
+| Dashboard, Widget | `dashboard_widgets` | One row per widget per user. |
+| — | `soft_deadlines` | Task, date and time, priority, completed. |
+| — | `project_financials`, `stage_costs`, `expenses` | Bid and budget, stage costs, and expenses, kept separate (see `docs/decisions/004-financial-precision-and-stage-costs.md`). |
+| — | `time_entries` | At most one running timer per person (enforced by the database). |
+| ExportJob | — | Exports are generated on request and not stored. |
 
-**Required but not modeled anywhere yet:** soft deadlines (task, date/time, priority, completed), bids, budgets, and stage costs; estimated and assigned hours; invitations; user preferences (theme, color-blindness setting, project-type mode, notification preferences); project-card customization (color, order); and calendar/OAuth connection state. Add these when finalizing the schema. Do not shrink scope to the classes already drawn, and do not treat diagram attributes as a finished schema.
+The prototype tables in the hosted Supabase project (`docs/SupabaseScreenshot.png`) are superseded. In particular, no `Login Page`, `Sidebar`, `templates`, `pages`, or `events` tables exist, and none should be added without a requirement.
+
+**Still not modeled:** pending invitations (UC-19's accept step).
 
 ## Repository layout
 
-This is the single target layout. Items marked *(planned)* do not exist yet. Create folders as work needs them.
+This is the target layout. Items marked *(planned)* do not exist yet. Create folders as work needs them.
 
 ```text
 CS3354_Team3_Project/
@@ -293,51 +326,53 @@ CS3354_Team3_Project/
 ├── CLAUDE.md                      # Imports README.md for Claude Code
 ├── CONTRIBUTING.md                # (planned) Branch, pull request, and review conventions
 ├── LICENSE
-├── .gitignore                     # (planned) node_modules, .env, build output, .DS_Store, draw.io backups
+├── .gitignore                     # Python caches, backend .env and SQLite files, web node_modules and dist
 ├── .github/                       # (planned)
-│   ├── workflows/ci.yml           # Lint, test, and build on every pull request
+│   ├── workflows/ci.yml           # Backend tests, web tests, and web build on every pull request
 │   └── pull_request_template.md   # IDs implemented, tests run, screenshots
 │
 ├── docs/
 │   ├── ProjectForge System Architecture.pdf
-│   ├── diagrams/                  # Editable diagram sources, one folder per author (currently docs/jon-diagrams/)
-│   └── decisions/                 # (planned) One short Markdown file per resolved open decision
+│   ├── jon-diagrams/              # Editable diagram sources (planned: docs/diagrams/<author>/)
+│   ├── decisions/                 # Architecture decision records (001–004)
+│   ├── fullstack-mvp/             # TEAM_HANDOFF.md: per-area files, tests, demo script, known limits
+│   └── frontend-comparison.md     # Frontend review and bug list
 │
-├── web/                           # (planned) React + TypeScript single-page application
+├── web/                           # React + TypeScript single-page application
 │   ├── package.json
 │   ├── package-lock.json
-│   ├── .env.example               # VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY (names only, no values)
 │   ├── index.html
-│   ├── vite.config.ts
+│   ├── vite.config.ts             # Dev server on 5173; forwards /api and /ws to the backend; Vitest config
+│   ├── tailwind.config.js
 │   ├── public/                    # Static files served as-is
-│   ├── e2e/                       # End-to-end tests of complete workflows
 │   └── src/
 │       ├── main.tsx               # Application entry point
-│       ├── app/                   # Router, layout shell, providers, session guard
+│       ├── index.css              # Tailwind layers, light/dark themes, color-blindness palettes
+│       ├── app/                   # Router and route guards, layout shell, theme provider
 │       ├── pages/                 # One file per screen; assembles feature components
-│       ├── components/            # UI shared by several features (buttons, dialogs, loading/empty/error states)
 │       ├── features/              # One folder per module (see below)
-│       ├── services/              # Shared Supabase infrastructure only
-│       │   ├── db/                # client.ts, database.types.ts (generated)
-│       │   ├── realtime/          # Channel subscription helpers
-│       │   └── storage/           # Upload and signed-link helpers
-│       ├── shared/                # Types, validation, constants, and permissions.ts used across features
-│       ├── styles/                # Global styles, light/dark themes, color-blindness palettes
-│       └── test/                  # Test setup and shared fixtures
+│       ├── services/              # apiClient.ts (REST), realtimeClient.ts (WebSocket), and their tests
+│       └── shared/                # Types, formatting, shared UI pieces, and permissions.ts
 │
-└── supabase/                      # (planned)
-    ├── config.toml
-    ├── migrations/                # Timestamped SQL: tables, RLS policies, triggers, cron jobs
-    ├── seed.sql                   # Fake development data only
-    ├── functions/                 # Deno Edge Functions
-    │   ├── _shared/
-    │   ├── auth-guard/            # Login lockout and unlock
-    │   ├── export-calendar/
-    │   ├── export-excel/
-    │   ├── export-sheets/
-    │   └── deadline-notifier/
-    └── tests/                     # Database and RLS policy tests
+├── backend/                       # FastAPI application server
+│   ├── requirements.txt
+│   ├── .env.example               # Variable names only
+│   ├── pytest.ini
+│   ├── app/
+│   │   ├── main.py                # App setup, middleware, router registration, /ws, serves web/dist when built
+│   │   ├── seed.py                # Demo data for an empty database
+│   │   ├── core/                  # config, database, security, permissions, realtime, sanitizer
+│   │   ├── models/entities.py     # SQLAlchemy tables (mirror supabase/migrations)
+│   │   ├── schemas/dto.py         # Request and response shapes
+│   │   └── routers/               # One file per requirement area (see Ownership)
+│   └── tests/                     # API, security, and database (RLS) tests
+│
+└── supabase/
+    ├── migrations/                # Numbered SQL: tables, RLS policies, triggers, indexes
+    └── seed.sql                   # Fake development data only
 ```
+
+The web app and backend were built without some of the folders planned earlier: `web/src/components/`, `web/src/styles/`, `web/e2e/`, `supabase/config.toml`, and `supabase/functions/`. Add `web/src/components/` when shared components are introduced (for example, the shared dropdown and checkbox ported from Preethi's frontend). Edge Functions are not used.
 
 ### Pages
 
@@ -383,53 +418,109 @@ web/src/features/
 
 The Development view names six modules (`auth`, `projects`, `tasks`, `collaboration`, `dashboard`, `export`). `settings/`, `members/`, `soft-deadlines/`, `costs/`, `time-tracking/`, and `reports/` are split out so each owner works in separate folders and so areas the view omitted (costs, hours, preferences) have a home.
 
-Inside each feature, keep related UI, logic, queries, and tests together:
+Inside each feature, keep related UI, logic, API calls, and tests together. For example, the current `features/tasks/`:
 
 ```text
 features/tasks/
-├── index.ts                 # Public exports; other code imports this feature only through index.ts
-├── taskController.ts        # Operations named on the SEQ "TaskController" lifeline, e.g. createTask(form)
-├── api.ts                   # Supabase queries for this feature only
+├── taskController.ts        # Operations named on the SEQ "TaskController" lifeline; calls services/apiClient.ts
 ├── model.ts                 # Pure domain rules from the class diagram, e.g. canAssignTasks()
 ├── validation.ts            # Input validation
-├── types.ts                 # Feature-specific types
-├── hooks/
-│   └── useTasks.ts
-├── components/
-│   ├── TaskCard.tsx
-│   └── TaskForm.tsx
+├── TaskCard.tsx
+├── TaskForm.tsx
 ├── model.test.ts            # Unit tests sit next to the code they test
-└── TaskForm.test.tsx
+└── validation.test.ts
 ```
+
+On the backend, each area's rules live in its router (`backend/app/routers/<area>.py`), with request and response shapes in `backend/app/schemas/dto.py`.
 
 ### Coding conventions
 
 - **Controllers.** Sequence diagrams name controllers (`ProjectController`, `ExportController`, `DashboardController`, `TaskController`, `CommentController`). Implement each as a plain TypeScript module, `<name>Controller.ts`, in the owning feature, exposing the operations named in the diagram (for example, `createProject(form)`, `exportToCalendar(project, target)`, `moveWidget(id, x, y)`, `postComment(body)`). Do not create a top-level `controllers/` folder.
-- **Testable rules.** Put pure rules (widget overlap, `canAssignTasks`, stage-cost totals, soft-deadline date validation) in `model.ts` or `validation.ts` with no Supabase calls, so they can be unit-tested directly.
+- **Testable rules.** Put pure rules (widget overlap, `canAssignTasks`, stage-cost totals, soft-deadline date validation) in `model.ts` or `validation.ts` with no network calls, so they can be unit-tested directly. The backend must enforce the same rules; the web copy only gives fast feedback.
 - **File headers.** Start every source file with a comment naming its author(s), what the module does, and the `SE-FR`/`SE-NFR`/`UC` IDs it implements. Comment logic that is not obvious.
 - **Test names.** Include IDs in test names, for example `"UC-05: rejects a soft deadline after the final due date (SE-FR-06)"`.
-- **Migrations.** Create migrations with `supabase migration new <name>`. Never edit a migration that has merged to `main`; add a new one. Enable RLS in the same migration that creates a table. Regenerate `database.types.ts` after migrations merge.
+- **Migrations.** Add the next numbered file in `supabase/migrations/` (for example, `0003_<name>.sql`) and update `backend/app/models/entities.py` in the same pull request. Never edit a migration that has merged to `main`; add a new one. Enable RLS in the same migration that creates a table. Update `backend/app/schemas/dto.py` and `web/src/shared/types.ts` when API shapes change.
 - **Dependencies.** Before adding a library, check whether the project already uses one for the same job. List every new dependency in the pull request description.
 
 ### Toolchain
 
-Working default, implied by the layout above; confirm it when the application is first scaffolded and record any change here:
+What the code uses today. Record any change here.
 
-- Node.js LTS and npm (commit `package-lock.json`)
-- Vite, React, and TypeScript (strict mode); React Router; `@supabase/supabase-js` v2
-- Vitest and React Testing Library for unit and component tests; Playwright for end-to-end tests
-- Supabase CLI for the local stack, migrations, type generation, Edge Functions, and database tests
-- ESLint and Prettier
+- **Web:**
+  - Node.js 22 LTS (recommended; see Setup) and npm (commit `package-lock.json`).
+  - Vite 5, React 18, TypeScript (strict mode), React Router 6, and Tailwind CSS 3.
+  - Vitest for unit tests.
+- **Backend:**
+  - Python 3.13 with FastAPI, Uvicorn, SQLAlchemy 2, and Pydantic 2.
+  - passlib/bcrypt, PyJWT, pyotp, nh3, and openpyxl.
+  - psycopg 3 for PostgreSQL.
+  - pytest and httpx for tests.
+- **Database:** PostgreSQL 16 (hosted on Supabase in production); SQLite for local demos and tests.
+- **Planned:** React Testing Library and Playwright, ESLint and Prettier, and CI.
+
+## Setup
+
+**Prerequisites:** Python 3.13, Node.js 22 LTS with npm, and optionally PostgreSQL 16 for the database-only tests.
+
+**Run the backend** (port 8000). With no `DATABASE_URL`, it creates and seeds `backend/projectforge.db` on first start:
+
+```bash
+cd backend
+python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+uvicorn app.main:app --reload --port 8000
+```
+
+**Run the web app** (port 5173; forwards `/api` and `/ws` to the backend):
+
+```bash
+cd web
+npm install
+npm run dev
+```
+
+Open http://localhost:5173. In demo mode, the login page lists the demo accounts, and the sidebar's role switcher signs in as Owner, Manager, or Member.
+
+**Environment variables:** names are in `backend/.env.example`. Put values in `backend/.env`, which is ignored by Git. The main ones:
+
+- `DATABASE_URL` (or `SUPABASE_DB_URL`) and `JWT_SECRET`.
+- `ENVIRONMENT` and `DEMO_MODE`. Demo mode defaults on outside production.
+- `FORCE_HTTPS`, `FRONTEND_URL`, and `SEED_DEMO_DATA`.
+- Lockout and rate-limit settings: `LOCKOUT_THRESHOLD`, `LOCKOUT_MINUTES`, `RATE_LIMIT_REQUESTS`, `RATE_LIMIT_WINDOW_SECONDS`.
+
+The web app reads only the optional `VITE_API_URL`.
+
+**Database:** for PostgreSQL or Supabase, apply `supabase/migrations/` in order, then optionally `supabase/seed.sql`, and set `DATABASE_URL`.
+
+**Test and build:**
+
+```bash
+cd backend && python -m pytest
+```
+
+```bash
+cd web && npm test
+```
+
+```bash
+cd web && npm run build
+```
+
+**Last verified (2026-11-24, macOS, Python 3.13.1, Node 25.9.0):**
+
+- **Backend:** 34 passed, 9 skipped. The skipped tests need PostgreSQL; see `docs/fullstack-mvp/TEAM_HANDOFF.md` for the `TEST_DATABASE_URL` and `SUPABASE_TEST_DB_URL` command.
+- **Web build:** succeeds.
+- **Web tests:** 39 passed, but `src/services/apiClient.test.ts` failed to load. Node 25 defines a global `localStorage` without `getItem`, and `apiClient.ts` reads it at import. Use Node 22 LTS until that check is fixed. Node 22 has not been verified here; the handoff reports all 43 web tests passing on its own environment.
 
 ## Implementation and verification guidance
 
 This sequence organizes the documented dependencies. It does not declare any feature complete.
 
 1. **Agree on shared contracts.** Settle the permission matrix, table names, and the open decisions that affect your use case before others depend on them. Reference `SE-FR`/`SE-NFR`/`UC` IDs in every change.
-2. **Scaffold once.** One person creates the `web/` and `supabase/` skeletons, toolchain configuration, CI, and `.env.example`, and merges them to `main` before others branch. Do not create a separate scaffold on your own branch.
-3. **Build complete workflows.** Connect each UI action through the controller, validation, API call, RLS policy, and persistence to visible feedback, including error paths.
+2. **Build on the existing scaffold.** `web/`, `backend/`, and `supabase/` exist. Branch from the latest `main`, and do not create a separate scaffold on your own branch. CI is still to be added.
+3. **Build complete workflows.** Connect each UI action through the controller, validation, API call, backend permission check, RLS policy, and persistence to visible feedback, including error paths.
 4. **Verify observable behavior.** Write requirement-linked test cases with preconditions, inputs/actions, expected results, and actual results. Cover normal flows, invalid input, access denial, persistence failures, and relevant performance targets. Test financial calculations independently, and test RLS policies and exports directly, not only through the UI.
-5. **Keep setup and status accurate.** Once code exists, add a Setup section listing prerequisites, environment variable names, database setup and seed steps, and the run, build, and test commands that have actually been run.
+5. **Keep setup and status accurate.** Update [Setup](#setup) and its "Last verified" note whenever prerequisites, environment variables, or commands change, listing only commands that have actually been run.
 
 Keep course deadlines, grading, submission formats, and assignment checklists out of this README.
 
@@ -442,11 +533,11 @@ Follow the working rule until the team records a decision in `docs/decisions/` a
 | Restore default vs. save layout (SE-FR-25) | SE Document and the Traceability Matrix: "Default dashboard restoration". Presentation FR slide (Myoram): "save their customized dashboard widget layout". Myoram's UC, HL, and EX describe saving. | Implement both as separate operations; SE-FR-25 is restore default. Correct the presentation's FR slide. |
 | When the layout saves | EX "Save Dashboard Layout" uses an explicit Save action; SEQ "Rearrange Dashboard Widgets" saves every non-overlapping move immediately. | Save each valid move, as in the SEQ. Decide whether an explicit Save action is also needed. |
 | Notification timing | SE-NFR-12: 2 seconds. Aashwat's HL and EX "Post a comment with a mention": 10 seconds. | 2 seconds. Correct the HL and EX. |
-| Financial and percentage precision | SE-NFR-01 states accuracy only; the presentation adds nearest cent, an ambiguous "±1 for rounding", and 0.01% for percentages. | Agree on currency, formulas, rounding stage and method, and tolerance before encoding acceptance thresholds. Keep the stage-cost and subtotal rules in UC-01. |
-| Backend technology | Tyler's SEQ "Log in" and "Create account": Django. All architecture views: Supabase. | Supabase only. Redraw those two diagrams. |
-| Account unlocking | Tyler's UC, EX, and SEQ: an administrator unlocks. Class diagram `unlockAccount(token)`, Physical view (unlock-account emails), and Architecture diagram (`auth-guard`): unlock by emailed token. | Implement lockout. Hold unlocking until the team decides who unlocks and how, along with the lockout threshold and duration. |
-| Roles and permissions | See [Roles and permissions](#roles-and-permissions). | Use the proposed matrix through the shared helpers. Get team sign-off before merging RLS policies for finance and performance data. |
-| Where Excel files are generated | Preethi's SEQ builds the `.xlsx` in the browser. The Physical view stores exported `.xlsx` files in Storage with signed links, and the Architecture diagram lists an `export-excel` Edge Function. | Follow the architecture views: generate on the server and return a signed link. |
+| Financial and percentage precision | SE-NFR-01 states accuracy only; the presentation adds nearest cent, an ambiguous "±1 for rounding", and 0.01% for percentages. | Agree on currency, formulas, rounding stage and method, and tolerance before encoding acceptance thresholds. Keep the stage-cost and subtotal rules in UC-01. Proposal: `docs/decisions/004-financial-precision-and-stage-costs.md`. |
+| Backend technology | **Decided 2026-11-24:** FastAPI stays (`docs/decisions/001-hybrid-fastapi-supabase-architecture.md`). Tyler's SEQ "Log in" and "Create account" still show Django, and the architecture views still show Supabase-only services. | FastAPI application server on PostgreSQL, as described in [Architecture](#architecture). Redraw the two Django diagrams and the architecture views. |
+| Account unlocking | Tyler's UC, EX, and SEQ: an administrator unlocks. Class diagram `unlockAccount(token)`, Physical view (unlock-account emails), and Architecture diagram (`auth-guard`): unlock by emailed token. | Implement lockout. Hold unlocking until the team decides who unlocks and how, along with the lockout threshold and duration. Proposal: `docs/decisions/003-account-lockout-and-unlock.md`. |
+| Roles and permissions | See [Roles and permissions](#roles-and-permissions). | Use the proposed matrix through the shared helpers. Get team sign-off before merging RLS policies for finance and performance data. Proposal: `docs/decisions/002-rbac-permission-matrix.md`. |
+| Where Excel files are generated | Preethi's SEQ builds the `.xlsx` in the browser. The Physical view stores exported `.xlsx` files in Storage with signed links, and the Architecture diagram lists an `export-excel` Edge Function. | Generate on the server. The FastAPI backend (`routers/exports.py`) builds the `.xlsx` and `.ics` files and returns them as downloads, with no stored copy or signed link. |
 | Calendar export contents | The SEQ exports "deadlines" without saying which. HL "Export to calendar" says ".ics file or calendar sync". The Context diagram draws calendar events flowing *into* ProjectForge. | Outbound export only. Which dates are exported (project deadline, task due dates, soft deadlines) and how re-exports avoid duplicates is undecided; ask Saaqib. |
 | Email scope | Physical view: unlock-account and deadline-reminder emails. Context diagram: "scheduled follow-ups & task reminders". Settings wireframe: "deadline and task digests". | Email only for account security and deadline reminders. Digests and follow-ups are out of scope until decided. |
 | Widget settings | Myoram's UC includes "Edit Widget Settings"; no requirement defines it. | Out of scope until decided. |
