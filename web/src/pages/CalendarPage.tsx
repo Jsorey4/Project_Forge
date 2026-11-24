@@ -126,8 +126,8 @@ export function CalendarPage() {
         </div>
         {exportProject ? (
           <div className="flex flex-wrap gap-2.5">
-            <button type="button" className="btn-secondary btn-sm" onClick={() => setExportTarget('google')}>Connect Google</button>
-            <button type="button" className="btn-secondary btn-sm" onClick={() => setExportTarget('outlook')}>Outlook</button>
+            <button type="button" className="btn-secondary btn-sm" onClick={() => setExportTarget('google')}>Export to Google Calendar</button>
+            <button type="button" className="btn-secondary btn-sm" onClick={() => setExportTarget('outlook')}>Export to Outlook</button>
             <button type="button" className="btn-secondary btn-sm" onClick={() => setExportTarget('ical')}>Export iCal</button>
           </div>
         ) : null}

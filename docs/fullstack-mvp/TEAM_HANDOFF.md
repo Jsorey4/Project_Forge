@@ -277,7 +277,7 @@ npx vitest run src/features/tasks src/features/collaboration
 
 ## Known limits (not hidden, not fixed here)
 
-- Calendar and Sheets "connections" record consent for one-way exports only. No Google or Microsoft account is linked and no OAuth token is stored.
+- Google Calendar and Outlook use per-export OAuth and require app credentials. See the calendar provider setup in the root README. The Sheets connection still records a local preference.
 - Emails go to the in-app dev outbox in demo mode; a real mail provider is not wired up.
 - The rate limiter and the live-update hub live in one server process. Running several API processes needs a shared store.
 - Only Chromium is installed in the build environment, so Firefox, Safari and Edge still need a manual pass (SE-NFR-05).

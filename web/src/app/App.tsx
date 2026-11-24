@@ -9,6 +9,7 @@ import type { ReactNode } from 'react';
 import { Link, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { useAuth } from '../features/auth/AuthProvider';
 import { BoardPage } from '../pages/BoardPage';
+import { CalendarExportReturn } from '../features/export/CalendarExportReturn';
 import { CalendarPage } from '../pages/CalendarPage';
 import { CostsPage } from '../pages/CostsPage';
 import { DashboardPage } from '../pages/DashboardPage';
@@ -62,6 +63,7 @@ export default function App() {
       <Route path="/" element={<LandingPage />} />
       <Route path="/login" element={<PublicOnly><LoginPage /></PublicOnly>} />
       <Route path="/signup" element={<PublicOnly><SignUpPage /></PublicOnly>} />
+      <Route path="/calendar/return/:provider" element={<CalendarExportReturn />} />
       <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route element={<ProtectedRoute><AppShell /></ProtectedRoute>}>
         <Route path="/dashboard" element={<DashboardPage />} />

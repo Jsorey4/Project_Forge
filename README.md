@@ -40,7 +40,7 @@ As of this revision, the repository contains a working full-stack MVP: a React w
 | `web/` | React + TypeScript single-page application (Vite, Tailwind CSS). |
 | `backend/` | FastAPI application server: one router per requirement area, shared security and permission code, tests. |
 | `supabase/migrations/`, `supabase/seed.sql` | PostgreSQL schema, RLS policies, and triggers (the database source of truth), plus demo seed data. |
-| `docs/decisions/` | Architecture decision records (ADR 001–004). |
+| `docs/decisions/` | Architecture decision records (ADR 001–005). |
 | `docs/fullstack-mvp/TEAM_HANDOFF.md` | Per-area file guide, demo script, and known limits for the MVP. |
 | `docs/frontend-comparison.md` | Review of the two candidate frontends and the bugs found in this MVP. |
 | `docs/ProjectForge System Architecture.pdf` | Logical, Physical, and Development views (the same views as the SE Document). These predate the FastAPI decision. |
@@ -53,7 +53,7 @@ As of this revision, the repository contains a working full-stack MVP: a React w
 - Layout breaks at some widths: the task-page timer row (1024–1280 px, and at 1440 px while running), the Cost "Add expense" row (768–1099 px), and the 2FA code boxes.
 - 2FA is optional per account; SE-FR-11 requires it.
 - Invitations add an existing user directly; there is no accept step (UC-19).
-- Calendar and Sheets exports build links or payloads; no Google or Microsoft account is connected. Email goes to an in-app development outbox, not SMTP.
+- Live Google Calendar and Outlook exports need provider app registrations. Their API calls have been tested with simulated provider responses. Google Sheets export builds a values payload. Email goes to an in-app development outbox, not SMTP.
 - Deadline reminders are created when a user loads notifications or the dashboard, not by a scheduled job (UC-22).
 
 ## Requirement areas and ownership
@@ -261,7 +261,7 @@ The Logical, Physical, and Development views in `docs/ProjectForge System Archit
 | Application (web) | One feature module per area in `web/src/features/` (UI, controllers, validation). `web/src/services/` holds the only network code: `apiClient.ts` (REST calls with timeouts and retry-safe saves) and `realtimeClient.ts` (the live-update WebSocket). |
 | Application server | **FastAPI** in `backend/app/`: one router per area in `routers/`, request and response shapes in `schemas/dto.py`, tables in `models/entities.py`. `core/` provides sign-in (bcrypt passwords, signed JWT sessions, TOTP 2FA, lockout, rate limits), permission checks (`permissions.py`), the live-update hub (`realtime.py`, one WebSocket at `/ws`), Markdown and spreadsheet sanitizing (`sanitizer.py`), HTTPS and security headers, and a development email outbox. Exports (`.ics`, `.xlsx`) are generated here. |
 | Data | **PostgreSQL** with **RLS on every table**, guard triggers, and indexes, all created by `supabase/migrations/`. The backend connects with a server role and enforces permissions itself; RLS and triggers hold the same rules for anyone reaching the database directly. Without `DATABASE_URL`, the backend uses a local **SQLite** file for demos and tests. SQLite has no RLS, so production must use PostgreSQL. |
-| Integrations | Downloadable iCal `.ics` files and `.xlsx` workbooks. Google Calendar and Outlook export currently build per-event "add to calendar" links, and Google Sheets export builds a values payload; no Google or Microsoft account is connected yet. SMTP email for unlock links and deadline reminders is planned; the development outbox stands in for it. |
+| Integrations | Downloadable iCal `.ics` files and `.xlsx` workbooks. FastAPI exchanges a per-export OAuth code and creates selected deadlines on the user’s primary Google calendar or default Outlook calendar. Google Sheets export builds a values payload. SMTP email for unlock links and deadline reminders is planned; the development outbox stands in for it. |
 | Build and delivery | *Planned:* GitHub Actions running backend tests, web tests, and the web build on every pull request, and a hosting choice for the backend and web app. Neither exists yet. |
 
 **Layer rule:** each layer uses only the layer below it plus `shared/`.
@@ -334,7 +334,7 @@ CS3354_Team3_Project/
 ├── docs/
 │   ├── ProjectForge System Architecture.pdf
 │   ├── jon-diagrams/              # Editable diagram sources (planned: docs/diagrams/<author>/)
-│   ├── decisions/                 # Architecture decision records (001–004)
+│   ├── decisions/                 # Architecture decision records (001–005)
 │   ├── fullstack-mvp/             # TEAM_HANDOFF.md: per-area files, tests, demo script, known limits
 │   └── frontend-comparison.md     # Frontend review and bug list
 │
@@ -454,7 +454,7 @@ What the code uses today. Record any change here.
   - Python 3.13 with FastAPI, Uvicorn, SQLAlchemy 2, and Pydantic 2.
   - passlib/bcrypt, PyJWT, pyotp, nh3, and openpyxl.
   - psycopg 3 for PostgreSQL.
-  - pytest and httpx for tests.
+  - httpx for OAuth and calendar calls, and pytest and httpx for tests.
 - **Database:** PostgreSQL 16 (hosted on Supabase in production); SQLite for local demos and tests.
 - **Planned:** React Testing Library and Playwright, ESLint and Prettier, and CI.
 
@@ -481,7 +481,7 @@ npm run dev
 
 Open http://localhost:5173. In demo mode, the login page lists the demo accounts, and the sidebar's role switcher signs in as Owner, Manager, or Member.
 
-**Environment variables:** names are in `backend/.env.example`. Put values in `backend/.env`, which is ignored by Git. The main ones:
+**Environment variables:** base settings are listed in `backend/.env.example`. Calendar OAuth settings are listed below. Put values in `backend/.env`, which is ignored by Git. The main ones:
 
 - `DATABASE_URL` (or `SUPABASE_DB_URL`) and `JWT_SECRET`.
 - `ENVIRONMENT` and `DEMO_MODE`. Demo mode defaults on outside production.
@@ -489,6 +489,19 @@ Open http://localhost:5173. In demo mode, the login page lists the demo accounts
 - Lockout and rate-limit settings: `LOCKOUT_THRESHOLD`, `LOCKOUT_MINUTES`, `RATE_LIMIT_REQUESTS`, `RATE_LIMIT_WINDOW_SECONDS`.
 
 The web app reads only the optional `VITE_API_URL`.
+
+### Calendar provider setup (UC-14)
+
+Each provider can be configured independently. Set `FRONTEND_URL` to the exact origin users open in their browser. It defaults to `http://localhost:5173`. Use HTTPS for deployed origins. Register the matching redirect URI as a **Web application** callback. FastAPI exchanges the code using the client secret.
+
+| Provider | App registration | Redirect URI for local development | Set on the backend |
+| --- | --- | --- | --- |
+| Google Calendar | Enable the Calendar API, configure the consent screen and create a Web application OAuth client. If the app is in testing, add the calendar account as a test user. The export requests `calendar.events.owned`. | `http://localhost:5173/calendar/return/google` | `GOOGLE_CALENDAR_CLIENT_ID`, `GOOGLE_CALENDAR_CLIENT_SECRET` |
+| Outlook | Register a Microsoft Entra Web app supporting organizational and personal Microsoft accounts. Add the Microsoft Graph **delegated** permission `Calendars.ReadWrite` and create a client secret. Use the secret’s value. | `http://localhost:5173/calendar/return/outlook` | `OUTLOOK_CALENDAR_CLIENT_ID`, `OUTLOOK_CALENDAR_CLIENT_SECRET` |
+
+Restart the backend after setting the credentials. On **Calendar**, choose a project, select **Export to Google Calendar** or **Export to Outlook**, choose deadline categories and continue to the provider. A successful return shows the export count. A failed export can be retried with the same provider account. The Settings preference skips the local confirmation. The provider still handles authorization on every export.
+
+Provider references are the [Google web server authorization guide](https://developers.google.com/identity/protocols/oauth2/web-server), [Google event insert](https://developers.google.com/workspace/calendar/api/v3/reference/events/insert), [Microsoft authorization code flow](https://learn.microsoft.com/en-us/entra/identity-platform/v2-oauth2-auth-code-flow), and [Graph event creation](https://learn.microsoft.com/en-us/graph/api/user-post-events?view=graph-rest-1.0).
 
 **Database:** for PostgreSQL or Supabase, apply `supabase/migrations/` in order, then optionally `supabase/seed.sql`, and set `DATABASE_URL`.
 
@@ -508,9 +521,9 @@ cd web && npm run build
 
 **Last verified (2026-11-24, macOS, Python 3.13.1, Node 25.9.0):**
 
-- **Backend:** 34 passed, 9 skipped. The skipped tests need PostgreSQL; see `docs/fullstack-mvp/TEAM_HANDOFF.md` for the `TEST_DATABASE_URL` and `SUPABASE_TEST_DB_URL` command.
-- **Web build:** succeeds.
-- **Web tests:** 39 passed, but `src/services/apiClient.test.ts` failed to load. Node 25 defines a global `localStorage` without `getItem`, and `apiClient.ts` reads it at import. Use Node 22 LTS until that check is fixed. Node 22 has not been verified here; the handoff reports all 43 web tests passing on its own environment.
+- **Backend:** 40 passed, 9 PostgreSQL-only tests skipped. The local run used `PYTHON_DOTENV_DISABLED=1 .venv/bin/python -m pytest --ignore-glob='*.env*'` inside `backend/`. The calendar tests simulate OAuth and event API responses. Live account verification is pending.
+- **Web build:** TypeScript checks and Vite bundling passed with `npm run build --prefix web -- --emptyOutDir=false` because the local build directory could not be emptied.
+- **Web tests:** 46 passed with `NODE_OPTIONS=--no-experimental-webstorage npm test --prefix web` on Node 25. This disables the incomplete Node 25 global `localStorage` in the test runner.
 
 ## Implementation and verification guidance
 
@@ -538,7 +551,7 @@ Follow the working rule until the team records a decision in `docs/decisions/` a
 | Account unlocking | Tyler's UC, EX, and SEQ: an administrator unlocks. Class diagram `unlockAccount(token)`, Physical view (unlock-account emails), and Architecture diagram (`auth-guard`): unlock by emailed token. | Implement lockout. Hold unlocking until the team decides who unlocks and how, along with the lockout threshold and duration. Proposal: `docs/decisions/003-account-lockout-and-unlock.md`. |
 | Roles and permissions | See [Roles and permissions](#roles-and-permissions). | Use the proposed matrix through the shared helpers. Get team sign-off before merging RLS policies for finance and performance data. Proposal: `docs/decisions/002-rbac-permission-matrix.md`. |
 | Where Excel files are generated | Preethi's SEQ builds the `.xlsx` in the browser. The Physical view stores exported `.xlsx` files in Storage with signed links, and the Architecture diagram lists an `export-excel` Edge Function. | Generate on the server. The FastAPI backend (`routers/exports.py`) builds the `.xlsx` and `.ics` files and returns them as downloads, with no stored copy or signed link. |
-| Calendar export contents | The SEQ exports "deadlines" without saying which. HL "Export to calendar" says ".ics file or calendar sync". The Context diagram draws calendar events flowing *into* ProjectForge. | Outbound export only. Which dates are exported (project deadline, task due dates, soft deadlines) and how re-exports avoid duplicates is undecided; ask Saaqib. |
+| Calendar export contents | The SEQ exports "deadlines" without saying which. HL "Export to calendar" says ".ics file or calendar sync". The Context diagram draws calendar events flowing *into* ProjectForge. | Outbound export only. The implementation keeps the existing project, task, and soft deadline selections. Per-export authorization, UTC times and retry identifiers are proposed for Saaqib’s review in [ADR 005](docs/decisions/005-calendar-provider-export.md). |
 | Email scope | Physical view: unlock-account and deadline-reminder emails. Context diagram: "scheduled follow-ups & task reminders". Settings wireframe: "deadline and task digests". | Email only for account security and deadline reminders. Digests and follow-ups are out of scope until decided. |
 | Widget settings | Myoram's UC includes "Edit Widget Settings"; no requirement defines it. | Out of scope until decided. |
 | AI wireframe copy | The landing-page wireframe (Saaqib) advertises an AI assistant; no requirement defines one. | Do not build it; treat the copy as placeholder text. |

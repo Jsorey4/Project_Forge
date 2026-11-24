@@ -464,11 +464,6 @@ def test_uc12_uc14_uc15_project_and_exports_uc13_se_fr16_to_se_fr20_se_nfr09_se_
 
     declined = client.post(f"/api/projects/{pid}/export/calendar", headers=H(client, "jon"), json={"target": "google", "oauth_consent": False})
     assert declined.status_code == 400 and "provider_links" not in declined.json()
-    google = client.post(f"/api/projects/{pid}/export/calendar", headers=H(client, "jon"), json={"target": "google", "oauth_consent": True}).json()
-    assert google["message"] == "7 deadlines added" and google["count"] == 7
-    assert all(link["url"].startswith("https://calendar.google.com/") for link in google["provider_links"])
-    outlook = client.post(f"/api/projects/{pid}/export/calendar", headers=H(client, "jon"), json={"target": "outlook", "oauth_consent": True}).json()
-    assert outlook["provider_links"][0]["url"].startswith("https://outlook.live.com/")
     nothing = client.post(
         f"/api/projects/{pid}/export/calendar", headers=H(client, "jon"),
         json={"target": "ical", "include_project_deadline": False, "include_task_due_dates": False, "include_soft_deadlines": False},
