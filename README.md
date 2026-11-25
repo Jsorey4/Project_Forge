@@ -40,7 +40,8 @@ As of this revision, the repository contains a working full-stack MVP: a React w
 | `web/` | React + TypeScript single-page application (Vite, Tailwind CSS). |
 | `backend/` | FastAPI application server: one router per requirement area, shared security and permission code, tests. |
 | `supabase/migrations/`, `supabase/seed.sql` | PostgreSQL schema, RLS policies, and triggers (the database source of truth), plus demo seed data. |
-| `docs/decisions/` | Architecture decision records (ADR 001–004). |
+| `Dockerfile`, `render.yaml`, `.dockerignore` | Single-container production image (built web app plus FastAPI) and a Render Blueprint. Proposed in ADR 006; the image builds and runs locally; not yet deployed. |
+| `docs/decisions/` | Architecture decision records (ADR 001–004, 006). |
 | `docs/fullstack-mvp/TEAM_HANDOFF.md` | Per-area file guide, demo script, and known limits for the MVP. |
 | `docs/frontend-comparison.md` | Review of the two candidate frontends and the bugs found in this MVP. |
 | `docs/ProjectForge System Architecture.pdf` | Logical, Physical, and Development views (the same views as the SE Document). These predate the FastAPI decision. |
@@ -262,7 +263,7 @@ The Logical, Physical, and Development views in `docs/ProjectForge System Archit
 | Application server | **FastAPI** in `backend/app/`: one router per area in `routers/`, request and response shapes in `schemas/dto.py`, tables in `models/entities.py`. `core/` provides sign-in (bcrypt passwords, signed JWT sessions, TOTP 2FA, lockout, rate limits), permission checks (`permissions.py`), the live-update hub (`realtime.py`, one WebSocket at `/ws`), Markdown and spreadsheet sanitizing (`sanitizer.py`), HTTPS and security headers, and a development email outbox. Exports (`.ics`, `.xlsx`) are generated here. |
 | Data | **PostgreSQL** with **RLS on every table**, guard triggers, and indexes, all created by `supabase/migrations/`. The backend connects with a server role and enforces permissions itself; RLS and triggers hold the same rules for anyone reaching the database directly. Without `DATABASE_URL`, the backend uses a local **SQLite** file for demos and tests. SQLite has no RLS, so production must use PostgreSQL. |
 | Integrations | Downloadable iCal `.ics` files and `.xlsx` workbooks. Google Calendar and Outlook export currently build per-event "add to calendar" links, and Google Sheets export builds a values payload; no Google or Microsoft account is connected yet. SMTP email for unlock links and deadline reminders is planned; the development outbox stands in for it. |
-| Build and delivery | *Planned:* GitHub Actions running backend tests, web tests, and the web build on every pull request, and a hosting choice for the backend and web app. Neither exists yet. |
+| Build and delivery | *Proposed (ADR 006):* one Docker web service on Render serving the API and the built web app, with the database on Supabase. *Planned:* GitHub Actions running backend tests, web tests, and the web build on every pull request. CI does not exist yet. |
 
 **Layer rule:** each layer uses only the layer below it plus `shared/`.
 
@@ -491,6 +492,23 @@ Open http://localhost:5173. In demo mode, the login page lists the demo accounts
 - Lockout and rate-limit settings: `LOCKOUT_THRESHOLD`, `LOCKOUT_MINUTES`, `RATE_LIMIT_REQUESTS`, `RATE_LIMIT_WINDOW_SECONDS`.
 
 The web app reads only the optional `VITE_API_URL`.
+
+### Deploy (proposed, ADR 006)
+
+One container serves the web app, `/api`, and `/ws` from a single origin. Render rebuilds it on every push to the tracked branch (`main`).
+
+1. In Render, choose **New → Blueprint**, connect this GitHub repository, and select `render.yaml`.
+2. `DATABASE_URL`: leave blank for a demo on SQLite inside the container (data is re-seeded on every deploy or restart), or enter the Supabase session-pooler connection string after applying `supabase/migrations/` in order.
+3. `FRONTEND_URL` is optional; it defaults to Render's `RENDER_EXTERNAL_URL`.
+4. Check `https://<service>.onrender.com/api/health`. It reports `"database": "sqlite"` or `"postgresql"`.
+
+To run the production image locally (Docker or Colima):
+
+```bash
+docker build -t projectforge:local . && docker run --rm -p 8080:8000 -e ENVIRONMENT=production -e JWT_SECRET=$(openssl rand -hex 32) -e DEMO_MODE=true -e FORCE_HTTPS=false projectforge:local
+```
+
+`DEMO_MODE=true` shows the demo accounts publicly. Verified 2026-11-24: the image builds and, run locally on SQLite, serves the landing page, login, dashboard, and live WebSocket on one port. The Render deploy and the Supabase connection have not been run.
 
 **Database:** for PostgreSQL or Supabase, apply `supabase/migrations/` in order, then optionally `supabase/seed.sql`, and set `DATABASE_URL`.
 

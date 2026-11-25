@@ -1,0 +1,14 @@
+.git
+.claude
+**/__pycache__
+**/.venv
+**/.pytest_cache
+backend/.env
+backend/.dev_jwt_secret
+backend/*.db
+backend/*.db-shm
+backend/*.db-wal
+backend/tests
+web/node_modules
+web/dist
+docs
