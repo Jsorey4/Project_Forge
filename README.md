@@ -23,7 +23,7 @@ This README is the single shared brief for every teammate working in this reposi
 4. **Stay in your area.** Each requirement area has an owner (see [Ownership](#requirement-areas-and-ownership)). Work in your own feature folders. Call out any change to shared code in the pull request description: `web/src/app/`, `web/src/shared/`, `web/src/services/`, `backend/app/core/`, `backend/app/main.py`, `backend/app/schemas/dto.py`, `backend/app/models/entities.py`, `supabase/migrations/`, CI configuration, or this README.
 5. **Authorization lives on the server.** Enforce every permission rule in the FastAPI backend through `require_project_role()` in `backend/app/core/permissions.py`, and mirror it in PostgreSQL Row Level Security (RLS) as a second check. The UI may hide controls for usability, but it is never the only check.
 6. **No secrets in Git.** Commit `.env.example` with variable names only. Never commit `.env`, `backend/.dev_jwt_secret`, database passwords or connection strings, Supabase service-role keys, OAuth client secrets, or real user data.
-7. **Branch and review.** Never commit directly to `main`. Branch from the latest `main` using `<name>/<area>-<short-topic>` (for example, `tyler/auth-login`), open a pull request, get at least one teammate's review, then merge. Keep each pull request to one area and one purpose.
+7. **Branch and review.** Never commit directly to `main`. Branch from the latest `main` using `<name>/<area>-<short-topic>` (for example, `tyler/auth-login`), open a pull request, review the diff yourself, then merge. Keep each pull request to one area and one purpose.
 8. **Keep this file accurate.** Update this README in the same pull request that changes behavior, structure, setup, or a decision. Describe planned work as planned; state that something works only after it has been run.
 
 **How sources are cited.** Diagrams are cited by type, title, and author, for example *EX "Log in" (Tyler)*. The SE Document (System Modeling and Architecture Design sections) and the SE Presentation contain the same diagrams under the same titles. Page and slide numbers are not used because they change between revisions. Diagram types: **UC** use-case diagram, **HL** high-level use case, **EX** expanded use case, **SEQ** sequence diagram, **WF** wireframe.
@@ -40,7 +40,7 @@ As of this revision, the repository contains a working full-stack MVP: a React w
 | `web/` | React + TypeScript single-page application (Vite, Tailwind CSS). |
 | `backend/` | FastAPI application server: one router per requirement area, shared security and permission code, tests. |
 | `supabase/migrations/`, `supabase/seed.sql` | PostgreSQL schema, RLS policies, and triggers (the database source of truth), plus demo seed data. |
-| `Dockerfile`, `docker-compose.yml`, `deploy/pi/`, `.dockerignore` | Single-container production image (built web app plus FastAPI), plus the Compose stack and update script for the Raspberry Pi. Proposed in ADR 006; the stack runs on the Pi on `127.0.0.1:8000`, with the public route still to be added. |
+| `Dockerfile`, `docker-compose.yml`, `deploy/pi/`, `.dockerignore` | Single-container production image (built web app plus FastAPI), plus the Compose stack and update script for the Raspberry Pi. Proposed in ADR 006; the stack runs on the Pi and is reachable through the Cloudflare Tunnel. |
 | `docs/decisions/` | Architecture decision records (ADR 001–004, 006). |
 | `docs/fullstack-mvp/TEAM_HANDOFF.md` | Per-area file guide, demo script, and known limits for the MVP. |
 | `docs/frontend-comparison.md` | Review of the two candidate frontends and the bugs found in this MVP. |
@@ -59,7 +59,7 @@ As of this revision, the repository contains a working full-stack MVP: a React w
 
 ## Requirement areas and ownership
 
-Each teammate authored one requirement area in the SE Document and owns the matching code. Owners review pull requests that touch their folders.
+Each teammate authored one requirement area in the SE Document and owns the matching code.
 
 | Area | Owner | Requirements | Use cases | Feature folders (`web/src/features/`) | Backend routers (`backend/app/routers/`) |
 | --- | --- | --- | --- | --- | --- |
@@ -522,13 +522,17 @@ To update after a merge, run this on the Pi. It does nothing when there is no ne
 deploy/pi/update.sh
 ```
 
+**What the live site shows.** The live site is one shared deployment of `main`; everyone who opens the URL sees the same site and the same data. A change reaches it only after it is merged to `main` and `deploy/pi/update.sh` is run on the Pi. Nothing runs that script automatically, so a merge alone does not change the live site. To see your own changes before they are merged, run the backend and the web app on your own machine (see [Setup](#setup): `uvicorn` and `npm run dev`). That copy uses its own local SQLite database and never touches the live site.
+
+A merged change that raises `SQLITE_SCHEMA_VERSION` in `backend/app/core/database.py` makes the Pi rebuild its demo database from the seed on the next update. The old file is kept in the data volume as `projectforge.db.bak-v<old version>`, but anything created on the live site is gone from the live data.
+
 To run the production image locally (Docker or Colima):
 
 ```bash
 docker build -t projectforge:local . && docker run --rm -p 8080:8000 -e ENVIRONMENT=production -e JWT_SECRET=$(openssl rand -hex 32) -e DEMO_MODE=true -e FORCE_HTTPS=false projectforge:local
 ```
 
-`DEMO_MODE=true` shows the demo accounts publicly. Verified 2026-11-24: the image builds and, run locally on SQLite, serves the landing page, login, dashboard, and live WebSocket on one port. Also verified 2026-11-24 on a MacBook (Colima, arm64): the Compose stack reports healthy, rate-limits on the address Cloudflare would append to `X-Forwarded-For` even when a client forges the header, and keeps its SQLite data across `docker compose down` and `up`. The same checks passed on the Pi itself (Debian 12, arm64), where the app is also unreachable from other devices on the home network. The Cloudflare route to this app, `deploy/pi/update.sh`, and the Supabase connection have not been run.
+`DEMO_MODE=true` shows the demo accounts publicly. Verified 2026-11-24: the image builds and, run locally on SQLite, serves the landing page, login, dashboard, and live WebSocket on one port. Also verified 2026-11-24 on a MacBook (Colima, arm64): the Compose stack reports healthy, rate-limits on the address Cloudflare would append to `X-Forwarded-For` even when a client forges the header, and keeps its SQLite data across `docker compose down` and `up`. The same checks passed on the Pi itself (Debian 12, arm64), where the app is also unreachable from other devices on the home network. Through the public Cloudflare route (2026-11-25): `/api/health` answers over HTTPS with HSTS and the security headers, plain HTTP redirects to HTTPS, login as the demo owner reaches the dashboard with the "Live" WebSocket badge, the Projects, Tasks, Charts, Cost, Calendar, People, Time tracking, and Settings pages load their data, the Member role gets "HTTP 403 · Access denied" on Cost, removing a dashboard widget and restoring the default layout both save (200), a client-supplied `CF-Connecting-IP` is refused with 403, and logins with a forged `X-Forwarded-For` are rate-limited on the real address (429). `deploy/pi/update.sh` switched the Pi to `main`, rebuilt, and reported healthy, and a second run did nothing. Cloudflare's Web Analytics script, if enabled for the zone, is blocked by the app's Content Security Policy and logs a console error; turn it off in the Cloudflare dashboard. The Supabase connection, the Manager role and its 2FA step, and creating or editing other records (tasks, comments, expenses) through the public route have not been tested.
 
 **Database:** for PostgreSQL or Supabase, apply `supabase/migrations/` in order, then optionally `supabase/seed.sql`, and set `DATABASE_URL`.
 
