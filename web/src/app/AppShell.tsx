@@ -204,7 +204,8 @@ export function AppShell() {
               {unread > 0 ? <span className="absolute right-1 top-1 h-2.5 w-2.5 rounded-full bg-accent" /> : null}
             </Link>
           </header>
-          <main className="w-full max-w-[1200px] flex-1 px-5 pb-12 pt-8 sm:px-12 sm:pt-10">
+          {/* Capped at 1440 px and centered: with a left-aligned 1200 px cap, a 1920 px window left ~480 px of dead space on the right. */}
+          <main className="mx-auto w-full max-w-[1440px] flex-1 px-5 pb-12 pt-8 sm:px-12 sm:pt-10">
             <Outlet key={user?.id} />
           </main>
         </div>
