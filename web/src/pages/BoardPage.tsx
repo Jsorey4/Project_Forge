@@ -4,11 +4,13 @@
  *   drag-and-drop (Task.moveTo) and a Task details panel for the selected card (status, due date, priority,
  *   assignee, tags, soft deadlines). Moves appear instantly and are rolled back if the server refuses them or
  *   the connection fails (with Retry). Filters by text, assignee, tag and feature list. Only owners and
- *   managers see "New task"; members can drag only the tasks assigned to them. Escape closes the task
- *   details panel.
- * @traces SE-FR-26, SE-FR-27, SE-FR-18, SE-NFR-04, SE-NFR-10, SE-NFR-11, UC-18
+ *   managers see "New task"; members can drag only the tasks assigned to them. From 1440 px wide the Task
+ *   details panel is a permanent right-hand column, so it never covers a board column, "New task" or the
+ *   filters (UI idea ported from Preethi Seereddy's frontend). Below 1440 px it is a drawer with a dimmed
+ *   backdrop: click the backdrop or press Escape to close it; focus moves into the drawer and back to the card.
+ * @traces SE-FR-26, SE-FR-27, SE-FR-18, SE-NFR-04, SE-NFR-07, SE-NFR-10, SE-NFR-11, UC-18
  */
-import { useCallback, useEffect, useMemo, useState, type DragEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../features/auth/AuthProvider';
 import { projectController } from '../features/projects/projectController';
@@ -50,7 +52,7 @@ function TaskDetailsPanel({ task, project, onClose }: { task: Task | undefined; 
     <aside className="card p-6" aria-label="Task details">
       <div className="flex items-center justify-between">
         <p className="eyebrow">Task details</p>
-        {onClose ? <button type="button" className="btn-ghost p-1.5 2xl:hidden" onClick={onClose} aria-label="Close task details"><Icon name="x" /></button> : null}
+        {onClose ? <button type="button" className="btn-ghost p-1.5 min-[1440px]:hidden" onClick={onClose} aria-label="Close task details"><Icon name="x" /></button> : null}
       </div>
       <h2 className="mt-2 text-[22px] font-extrabold leading-[30px] tracking-[-0.01em]">{task.title}</h2>
       <p className="mt-2 flex items-center gap-2 text-sm text-body">{project.name} <ModeBadge mode={project.project_type} /></p>
@@ -89,6 +91,20 @@ export function BoardPage() {
   const [error, setError] = useState<string | null>(null);
   const [failedMove, setFailedMove] = useState<{ taskId: string; status: TaskStatus; index: number; error: ApiError } | null>(null);
   const [creating, setCreating] = useState<TaskStatus | null>(null);
+
+  const drawerRef = useRef<HTMLDivElement>(null);
+
+  // Below 1440 px the details panel is a drawer: move focus into it when it opens and hand focus back to the
+  // card when it closes (in the permanent column at 1440 px and up, focus stays on the card).
+  useEffect(() => {
+    if (!selectedId || window.matchMedia('(min-width: 1440px)').matches) return undefined;
+    drawerRef.current?.querySelector<HTMLElement>('button[aria-label="Close task details"]')?.focus();
+    return () => {
+      setTimeout(() => {
+        if (document.activeElement === document.body) document.querySelector<HTMLElement>(`[data-task-id="${selectedId}"]`)?.focus();
+      }, 0);
+    };
+  }, [selectedId]);
 
   // Escape closes the task details panel (a slide-in drawer on smaller screens), unless a dialog is open
   // on top of it - the dialog handles its own Escape first.
@@ -214,7 +230,7 @@ export function BoardPage() {
         {error ? <Alert onClose={() => setError(null)}>{error} The card was moved back.</Alert> : null}
         <RetryBanner error={failedMove?.error ?? null} onRetry={() => failedMove && void commitMove(failedMove.taskId, failedMove.status, failedMove.index)} onCancel={() => setFailedMove(null)} />
       </div>
-      <div className="grid gap-5 2xl:grid-cols-[minmax(0,1fr)_300px]">
+      <div className="grid gap-5 min-[1440px]:grid-cols-[minmax(0,1fr)_300px]">
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {BOARD_COLUMNS.map((col) => (
             <section
@@ -251,12 +267,15 @@ export function BoardPage() {
           ))}
         </div>
         {selected ? (
-          // Below 1536px the panel slides in from the right so the four columns keep the mockup's card width.
-          <div className="fixed inset-y-0 right-0 z-40 w-full max-w-[360px] overflow-y-auto border-l border-line bg-canvas p-4 shadow-pop 2xl:sticky 2xl:top-8 2xl:z-auto 2xl:max-w-none 2xl:self-start 2xl:overflow-visible 2xl:border-0 2xl:bg-transparent 2xl:p-0 2xl:shadow-none">
-            <TaskDetailsPanel task={selected} project={project} onClose={() => setSelectedId(null)} />
-          </div>
+          <>
+            {/* Below 1440 px: a dimmed backdrop (click to close) behind the drawer, full width on a phone. */}
+            <div className="fixed inset-0 z-30 bg-black/50 min-[1440px]:hidden" onClick={() => setSelectedId(null)} aria-hidden="true" />
+            <div ref={drawerRef} className="fixed inset-y-0 right-0 z-40 w-full overflow-y-auto border-l border-line bg-canvas p-4 shadow-pop sm:max-w-[360px] min-[1440px]:sticky min-[1440px]:bottom-auto min-[1440px]:right-auto min-[1440px]:top-8 min-[1440px]:z-auto min-[1440px]:max-w-none min-[1440px]:self-start min-[1440px]:overflow-visible min-[1440px]:border-0 min-[1440px]:bg-transparent min-[1440px]:p-0 min-[1440px]:shadow-none">
+              <TaskDetailsPanel task={selected} project={project} onClose={() => setSelectedId(null)} />
+            </div>
+          </>
         ) : (
-          <div className="hidden 2xl:sticky 2xl:top-8 2xl:block 2xl:self-start">
+          <div className="hidden min-[1440px]:sticky min-[1440px]:top-8 min-[1440px]:block min-[1440px]:self-start">
             <TaskDetailsPanel task={undefined} project={project} />
           </div>
         )}
