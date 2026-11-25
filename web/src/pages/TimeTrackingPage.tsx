@@ -182,13 +182,13 @@ export function TimeTrackingPage() {
 
   return (
     <div>
-      <PageHeader title="Time tracking & export" subtitle={running ? <><b>1 timer</b> running</> : 'No timer running'} />
+      <PageHeader title="Time tracking & export" subtitle={running ? <><b>1 timer</b> {running.is_paused ? 'paused' : 'running'}</> : 'No timer running'} />
       {error ? <div className="mb-4"><Alert onClose={() => setError(null)}>{error}</Alert></div> : null}
-      <div className="grid gap-6 lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <Card
           title="Timer"
           className="flex min-h-[440px] flex-col"
-          actions={running ? <span className="flex items-center gap-1.5 text-xs font-semibold text-ok"><span className="h-2 w-2 rounded-full bg-ok" />{running.is_paused ? 'Paused' : 'Running'}</span> : null}
+          actions={running ? <span className={`flex items-center gap-1.5 text-xs font-semibold ${running.is_paused ? 'text-warn' : 'text-ok'}`}><span className={`h-2 w-2 rounded-full ${running.is_paused ? 'bg-warn' : 'bg-ok'}`} />{running.is_paused ? 'Paused' : 'Running'}</span> : null}
         >
           {myTasks === null ? <Spinner /> : myTasks.length === 0 ? (
             <EmptyState icon="clock" title="No open tasks assigned to you">When a manager assigns you a task, you can time it here.</EmptyState>
@@ -244,7 +244,7 @@ export function TimeTrackingPage() {
                     {scope === 'project' ? <td className="table-cell">@{e.username}</td> : null}
                     <td className="table-cell">{e.stage_name ?? <span className="text-muted">—</span>}</td>
                     <td className="table-cell whitespace-nowrap">{formatDateTime(e.started_at)}</td>
-                    <td className="table-cell">{e.is_running ? <Badge tone="ok" icon={e.is_paused ? 'pause' : 'play'}>{e.is_paused ? 'Paused' : 'Running'} {formatDuration(e.elapsed_seconds)}</Badge> : <Badge tone="neutral" icon={e.source === 'timer' ? 'clock' : 'edit'}>{e.source === 'timer' ? 'Timer' : 'Manual'}</Badge>}</td>
+                    <td className="table-cell">{e.is_running ? <Badge tone={e.is_paused ? 'warn' : 'ok'} icon={e.is_paused ? 'pause' : 'play'}>{e.is_paused ? 'Paused' : 'Running'} {formatDuration(e.elapsed_seconds)}</Badge> : <Badge tone="neutral" icon={e.source === 'timer' ? 'clock' : 'edit'}>{e.source === 'timer' ? 'Timer' : 'Manual'}</Badge>}</td>
                     <td className="table-cell text-right font-bold tabular-nums text-ink">{formatHours(e.duration_hours)}</td>
                     <td className="table-cell">{!e.is_running ? <button type="button" className="btn-ghost p-1.5 hover:text-danger" onClick={() => void remove(e.id)} aria-label="Delete entry"><Icon name="trash" /></button> : null}</td>
                   </tr>

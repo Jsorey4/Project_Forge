@@ -54,9 +54,12 @@ function DeadlineControls({ title, date, time, priority, onTitle, onDate, onTime
   maxDate?: string; idPrefix: string;
 }) {
   return (
-    <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_9.5rem_8.5rem_7.5rem]">
+    <div className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_9.5rem_8.5rem_7.5rem]">
       <input className="input" placeholder="Checkpoint, e.g. First draft" value={title} onChange={(e) => onTitle(e.target.value)} aria-label={`${idPrefix} soft deadline title`} maxLength={120} />
-      <input className="input" type="date" value={date} max={maxDate} onChange={(e) => onDate(e.target.value)} aria-label={`${idPrefix} soft deadline date`} />
+      <div className="relative min-w-0">
+        <input className="input" type="date" value={date} max={maxDate} onChange={(e) => onDate(e.target.value)} aria-label={`${idPrefix} soft deadline date`} />
+        {!date ? <span className="date-hint" aria-hidden="true">Select date</span> : null}
+      </div>
       <input className="input" type="time" value={time} onChange={(e) => onTime(e.target.value)} aria-label={`${idPrefix} soft deadline time`} />
       <Select value={priority} onChange={(v) => onPriority(v as SoftDeadlinePriority)} ariaLabel={`${idPrefix} soft deadline priority`} options={SOFT_DEADLINE_PRIORITIES} />
     </div>

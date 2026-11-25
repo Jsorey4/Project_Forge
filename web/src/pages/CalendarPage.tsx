@@ -104,9 +104,13 @@ export function CalendarPage() {
       <div className="-mt-3 flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2">
           <Segmented ariaLabel="Calendar view" value={view} onChange={setView} options={[{ value: 'month', label: 'Month' }, { value: 'week', label: 'Week' }, { value: 'day', label: 'Day' }]} />
-          <button type="button" className="btn-secondary btn-sm px-2" onClick={() => shift(-1)} aria-label={`Previous ${view}`}><Icon name="chevron-left" /></button>
-          <button type="button" className="btn-secondary btn-sm" onClick={() => setCursor(new Date())}>Today</button>
-          <button type="button" className="btn-secondary btn-sm px-2" onClick={() => shift(1)} aria-label={`Next ${view}`}><Icon name="chevron-right" /></button>
+          {/* One group, so on a narrow screen the three buttons wrap together instead of the next arrow dropping alone. */}
+          {/* items-stretch: the icon-only arrows are 4 px shorter than the text button (16 px icon vs 20 px line), so they take its height. */}
+          <div className="flex items-stretch gap-2">
+            <button type="button" className="btn-secondary btn-sm px-2" onClick={() => shift(-1)} aria-label={`Previous ${view}`}><Icon name="chevron-left" /></button>
+            <button type="button" className="btn-secondary btn-sm" onClick={() => setCursor(new Date())}>Today</button>
+            <button type="button" className="btn-secondary btn-sm px-2" onClick={() => shift(1)} aria-label={`Next ${view}`}><Icon name="chevron-right" /></button>
+          </div>
         </div>
         {exportProject ? (
           <div className="flex flex-wrap gap-2.5">

@@ -99,7 +99,7 @@ export function WidgetBody({ type, data }: { type: string; data: Record<string, 
           <p className="mt-1 text-sm text-body">This week</p>
           {t.running_timer ? (
             <Link to={`/tasks/${t.running_timer.task_id}`} className="mt-4 flex items-center gap-2 text-xs font-semibold text-ok">
-              <span className="h-2 w-2 rounded-full bg-ok" /> {t.running_timer.is_paused ? 'Paused' : 'Running'}: {t.running_timer.task_title}
+              <span className={`h-2 w-2 rounded-full ${t.running_timer.is_paused ? 'bg-warn' : 'bg-ok'}`} /> {t.running_timer.is_paused ? 'Paused' : 'Running'}: {t.running_timer.task_title}
             </Link>
           ) : (
             <Link to="/time" className="mt-4 text-xs font-semibold text-accent">Open time tracking →</Link>

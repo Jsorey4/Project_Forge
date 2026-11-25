@@ -102,7 +102,7 @@ export function ProjectPicker({ className = '' }: { className?: string }) {
   if (projects.length === 0) return null;
   return (
     <div className={`flex items-center gap-2 text-sm ${className}`}>
-      <Select className="w-auto min-w-[14rem] py-1.5" value={currentProjectId ?? ''} onChange={setCurrentProjectId} ariaLabel="Current project" options={projects.map((p) => ({ value: p.id, label: `${p.name} · ${p.my_role}` }))} />
+      <Select className="w-auto min-w-[14rem] py-1.5" value={currentProjectId ?? ''} onChange={setCurrentProjectId} ariaLabel="Current project" options={projects.map((p) => ({ value: p.id, label: p.name }))} />
     </div>
   );
 }

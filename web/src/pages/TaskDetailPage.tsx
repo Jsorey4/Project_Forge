@@ -52,7 +52,7 @@ function HoursCard({ task, onChanged }: { task: TaskDetail; onChanged: () => voi
             <p className="label">Plan (owners & managers)</p>
             <RetryBanner error={plan.networkError} onRetry={plan.retry} onCancel={plan.cancel} busy={plan.saving} />
             {plan.error ? <Alert>{plan.error.detail}</Alert> : null}
-            <div className="grid grid-cols-[1fr_1fr_auto] gap-2">
+            <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] gap-2">
               <input className="input" type="number" min={0} step="0.25" placeholder="Estimated" value={est} onChange={(e) => setEst(e.target.value)} aria-label="Estimated hours" />
               <input className="input" type="number" min={0} step="0.25" placeholder="Assigned" value={assigned} onChange={(e) => setAssigned(e.target.value)} aria-label="Assigned hours" />
               <button type="button" className="btn-secondary" onClick={() => void plan.run()} disabled={plan.saving}>Save</button>
@@ -68,7 +68,7 @@ function HoursCard({ task, onChanged }: { task: TaskDetail; onChanged: () => voi
             <p className="label">Log hours manually</p>
             <RetryBanner error={log.networkError} onRetry={log.retry} onCancel={log.cancel} busy={log.saving} />
             {log.error ? <Alert>{log.error.detail}</Alert> : null}
-            <div className="grid grid-cols-[6rem_1fr] gap-2">
+            <div className="grid grid-cols-[6rem_minmax(0,1fr)] gap-2">
               <input className="input" type="number" min={0.25} max={24} step="0.25" placeholder="Hours" value={actual} onChange={(e) => setActual(e.target.value)} aria-label="Hours worked" />
               <input className="input" type="date" value={workDate} max={todayIso()} onChange={(e) => setWorkDate(e.target.value)} aria-label="Work date" />
             </div>
@@ -161,7 +161,8 @@ export function TaskDetailPage() {
       </div>
       {actionError ? <div className="mb-4"><Alert onClose={() => setActionError(null)}>{actionError}</Alert></div> : null}
       {!task.can_edit ? <div className="mb-4"><Alert tone="info">You can view and comment on this task. Only its assignee or a manager can change it.</Alert></div> : null}
-      <div className="grid gap-6 lg:grid-cols-3">
+      {/* grid-cols-1 is minmax(0, 1fr): without it the single mobile column grows to the widest row inside it (the timer). */}
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <div className="space-y-6 lg:col-span-2">
           <Card title="Description">
             {task.description ? <SafeMarkdown source={task.description} memberNames={memberNames} /> : <p className="text-sm text-muted">No description.</p>}
