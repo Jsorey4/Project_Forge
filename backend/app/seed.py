@@ -229,16 +229,25 @@ def seed_demo_data(db: Session) -> bool:
     # ---------------------------------------------------------------- financials
     db.add(ProjectFinancials(project_id=platform.id, bid_amount=Decimal("48500.00"), budget_amount=Decimal("42000.00"), currency="USD", updated_by=u["jon"]))
     db.add(ProjectFinancials(project_id=semester.id, bid_amount=Decimal("0.00"), budget_amount=Decimal("350.00"), currency="USD", updated_by=u["tyler"]))
+    # name, stage cost, hourly rate, estimated hours (rate and hours feed only the labor comparison)
     stages = [
-        ("Requirements", "4250.00"),
-        ("Design", "6800.50"),
-        ("Implementation", "18400.25"),
-        ("Testing", "5120.10"),
-        ("Deployment", "2300.00"),
+        ("Requirements", "4250.00", "85.00", "6.00"),
+        ("Design", "6800.50", "90.00", "60.00"),
+        ("Implementation", "18400.25", "95.00", "200.00"),
+        ("Testing", "5120.10", "80.00", "60.00"),
+        ("Deployment", "2300.00", None, None),
     ]
     stage_rows = []
-    for i, (name, amount) in enumerate(stages):
-        s = StageCost(project_id=platform.id, stage_name=name, amount=Decimal(amount), position=i, notes="")
+    for i, (name, amount, rate, est_hours) in enumerate(stages):
+        s = StageCost(
+            project_id=platform.id,
+            stage_name=name,
+            amount=Decimal(amount),
+            hourly_rate=Decimal(rate) if rate else None,
+            estimated_hours=Decimal(est_hours) if est_hours else None,
+            position=i,
+            notes="",
+        )
         db.add(s)
         stage_rows.append(s)
     db.add(StageCost(project_id=semester.id, stage_name="Printing & materials", amount=Decimal("120.00"), position=0, notes="Poster and handouts"))
@@ -270,7 +279,7 @@ def seed_demo_data(db: Session) -> bool:
     db.add(Expense(project_id=semester.id, category="materials", description="Poster printing", amount=Decimal("64.25"), expense_date=today - timedelta(days=3), created_by=u["tyler"]))
 
     # -------------------------------------------------------------- time entries
-    def log(t: Task, username: str, days_ago: int, hours: str, note: str = "") -> None:
+    def log(t: Task, username: str, days_ago: int, hours: str, note: str = "", stage: int | None = None) -> None:
         start = datetime.combine(today - timedelta(days=days_ago), datetime.min.time()) + timedelta(hours=14)
         h = Decimal(hours)
         db.add(
@@ -278,6 +287,7 @@ def seed_demo_data(db: Session) -> bool:
                 project_id=t.project_id,
                 task_id=t.id,
                 user_id=u[username],
+                stage_cost_id=stage_rows[stage].id if stage is not None else None,
                 source="timer" if days_ago % 2 == 0 else "manual",
                 started_at=start,
                 ended_at=start + timedelta(seconds=int(h * 3600)),
@@ -287,22 +297,22 @@ def seed_demo_data(db: Session) -> bool:
             )
         )
 
-    log(t_req, "preethi", 20, "3.50")
-    log(t_req, "preethi", 18, "3.25")
-    log(t_erd, "jon", 16, "4.00")
-    log(t_erd, "jon", 15, "5.50")
-    log(t_auth, "tyler", 12, "6.00")
-    log(t_auth, "tyler", 10, "5.25")
-    log(t_costs, "jon", 6, "4.75")
-    log(t_costs, "jon", 3, "2.50")
-    log(t_board, "staff", 9, "3.00", "Initial column layout")
-    log(t_board, "staff", 6, "4.25", "Drag handles")
-    log(t_board, "staff", 2, "2.00", "Snap-back on failure")
-    log(t_widgets, "myoram", 7, "5.00")
-    log(t_widgets, "myoram", 4, "4.50")
+    log(t_req, "preethi", 20, "3.50", stage=0)
+    log(t_req, "preethi", 18, "3.25", stage=0)
+    log(t_erd, "jon", 16, "4.00", stage=1)
+    log(t_erd, "jon", 15, "5.50", stage=1)
+    log(t_auth, "tyler", 12, "6.00", stage=2)
+    log(t_auth, "tyler", 10, "5.25", stage=2)
+    log(t_costs, "jon", 6, "4.75", stage=2)
+    log(t_costs, "jon", 3, "2.50", stage=2)
+    log(t_board, "staff", 9, "3.00", "Initial column layout", stage=2)
+    log(t_board, "staff", 6, "4.25", "Drag handles", stage=2)
+    log(t_board, "staff", 2, "2.00", "Snap-back on failure", stage=2)
+    log(t_widgets, "myoram", 7, "5.00", stage=2)
+    log(t_widgets, "myoram", 4, "4.50", stage=2)
     log(t_comments, "aashwat", 5, "3.75")
     log(t_comments, "aashwat", 1, "2.25")
-    log(t_soft, "preethi", 4, "2.50")
+    log(t_soft, "preethi", 4, "2.50", stage=3)
     log(t_export, "saaqib", 3, "1.50")
     log(s_srs, "preethi", 25, "6.00")
     log(s_srs, "preethi", 22, "7.00")

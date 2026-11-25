@@ -8,6 +8,12 @@
 import { api } from '../../services/apiClient';
 import type { CostQuery, CostSummary, Expense, ExpenseCategory, StageCost } from '../../shared/types';
 
+/** Rate and estimated hours are the labor comparison; null clears a value. */
+export interface StageLaborInput {
+  hourly_rate?: string | null;
+  estimated_hours?: string | null;
+}
+
 export interface ExpenseInput {
   category: ExpenseCategory;
   description: string;
@@ -27,9 +33,9 @@ export const costController = {
     }),
   updateFinancials: (projectId: string, values: { bid_amount?: string; budget_amount?: string }) =>
     api.put<CostSummary>(`/api/projects/${projectId}/financials`, values),
-  addStage: (projectId: string, stage: { stage_name: string; amount: string; notes?: string }) =>
+  addStage: (projectId: string, stage: { stage_name: string; amount: string; notes?: string } & StageLaborInput) =>
     api.post<StageCost>(`/api/projects/${projectId}/stage-costs`, stage),
-  updateStage: (projectId: string, stageId: string, stage: { stage_name?: string; amount?: string; notes?: string }) =>
+  updateStage: (projectId: string, stageId: string, stage: { stage_name?: string; amount?: string; notes?: string } & StageLaborInput) =>
     api.put<StageCost>(`/api/projects/${projectId}/stage-costs/${stageId}`, stage),
   deleteStage: (projectId: string, stageId: string) => api.del<void>(`/api/projects/${projectId}/stage-costs/${stageId}`),
   addExpense: (projectId: string, expense: ExpenseInput) => api.post<Expense>(`/api/projects/${projectId}/expenses`, expense),

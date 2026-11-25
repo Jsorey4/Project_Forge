@@ -77,12 +77,12 @@ insert into public.project_financials (project_id, bid_amount, budget_amount, cu
   ('10000000-0000-4000-8000-000000000001', 48500.00, 42000.00, 'USD', '00000000-0000-4000-8000-000000000001')
 on conflict (project_id) do nothing;
 
-insert into public.stage_costs (project_id, stage_name, amount, position) values
-  ('10000000-0000-4000-8000-000000000001', 'Requirements',    4250.00, 0),
-  ('10000000-0000-4000-8000-000000000001', 'Design',          6800.50, 1),
-  ('10000000-0000-4000-8000-000000000001', 'Implementation', 18400.25, 2),
-  ('10000000-0000-4000-8000-000000000001', 'Testing',         5120.10, 3),
-  ('10000000-0000-4000-8000-000000000001', 'Deployment',      2300.00, 4);
+insert into public.stage_costs (project_id, stage_name, amount, hourly_rate, estimated_hours, position) values
+  ('10000000-0000-4000-8000-000000000001', 'Requirements',    4250.00, 85.00,   6.00, 0),
+  ('10000000-0000-4000-8000-000000000001', 'Design',          6800.50, 90.00,  60.00, 1),
+  ('10000000-0000-4000-8000-000000000001', 'Implementation', 18400.25, 95.00, 200.00, 2),
+  ('10000000-0000-4000-8000-000000000001', 'Testing',         5120.10, 80.00,  60.00, 3),
+  ('10000000-0000-4000-8000-000000000001', 'Deployment',      2300.00, null,    null, 4);
 
 insert into public.expenses (project_id, category, description, amount, expense_date, created_by) values
   ('10000000-0000-4000-8000-000000000001', 'software',  'Supabase Pro plan (1 month)',   25.00, current_date - 30, '00000000-0000-4000-8000-000000000001'),

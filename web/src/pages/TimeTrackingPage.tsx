@@ -4,8 +4,10 @@
  *   Pause / Stop), a Recent time records card with "Manual entry", and an Export card (project, which data
  *   to include, Excel (.xlsx) or Google Sheets). Below, the full time-entry table: members only ever see
  *   their own entries; owners and managers can switch to the whole project. Cost data is only offered to
- *   owners and managers, and the server applies the same rule.
- * @traces SE-FR-04, SE-FR-20, SE-NFR-02, UC-03, UC-04, UC-15
+ *   owners and managers, and the server applies the same rule. A timer or manual entry can name the cost stage
+ *   it was worked on, and the entry table shows it (labor breakdown; UI idea ported from Preethi Seereddy's
+ *   frontend).
+ * @traces SE-FR-01, SE-FR-04, SE-FR-20, SE-NFR-02, UC-03, UC-04, UC-15
  */
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
@@ -17,7 +19,7 @@ import { hoursByDay, isValidHours } from '../features/time-tracking/model';
 import { timeController } from '../features/time-tracking/timeController';
 import { useRealtime } from '../services/realtimeClient';
 import { isManager } from '../shared/permissions';
-import type { SpreadsheetSection, Task, TimeEntry } from '../shared/types';
+import type { SpreadsheetSection, StageName, Task, TimeEntry } from '../shared/types';
 import { formatDateTime, formatDuration, formatHours, todayIso } from '../shared/format';
 import { Select } from '../components/Select';
 import { Checkbox } from '../components/Checkbox';
@@ -118,6 +120,8 @@ export function TimeTrackingPage() {
   const [date, setDate] = useState(todayIso());
   const [note, setNote] = useState('');
   const [manualTask, setManualTask] = useState('');
+  const [manualStage, setManualStage] = useState('');
+  const [manualStages, setManualStages] = useState<StageName[]>([]);
   const [error, setError] = useState<string | null>(null);
   const days = weekDays();
   const canSeeProject = isManager(currentProject?.my_role);
@@ -149,9 +153,19 @@ export function TimeTrackingPage() {
 
   const selected = myTasks?.find((t) => t.id === taskId);
   const manual = myTasks?.find((t) => t.id === manualTask);
+  // Stages of the chosen task's project; a stage from another project is never offered (and the server refuses it).
+  const manualProject = manual?.project_id;
+  useEffect(() => {
+    setManualStage('');
+    setManualStages([]);
+    if (!manualProject) return;
+    let live = true;
+    timeController.stages(manualProject).then((rows) => live && setManualStages(rows)).catch(() => live && setManualStages([]));
+    return () => { live = false; };
+  }, [manualProject]);
   const log = useSave(
-    () => timeController.setHours(manual!.project_id, manual!.id, { actual_hours: Number(hours), work_date: date, note }),
-    () => { setHours(''); setNote(''); setManualOpen(false); void loadEntries(); },
+    () => timeController.setHours(manual!.project_id, manual!.id, { actual_hours: Number(hours), work_date: date, note, stage_cost_id: manualStage || null }),
+    () => { setHours(''); setNote(''); setManualStage(''); setManualOpen(false); void loadEntries(); },
   );
 
   const weekTotal = hoursByDay(myEntries, days).reduce((a, b) => a + b, 0);
@@ -183,7 +197,7 @@ export function TimeTrackingPage() {
               <Select value={taskId} onChange={setTaskId} ariaLabel="Task to time" disabled={!!running} options={myTasks.map((t) => ({ value: t.id, label: t.title }))} />
               {selected ? (
                 <div className="mt-10">
-                  <TaskTimerWidget variant="hero" taskId={selected.id} taskTitle={selected.title} projectName={`Est ${formatHours(selected.estimated_hours)} · Actual ${formatHours(selected.actual_hours)}`} canTrack onStopped={() => void loadEntries()} onActiveChange={onActiveChange} />
+                  <TaskTimerWidget variant="hero" taskId={selected.id} projectId={selected.project_id} taskTitle={selected.title} projectName={`Est ${formatHours(selected.estimated_hours)} · Actual ${formatHours(selected.actual_hours)}`} canTrack onStopped={() => void loadEntries()} onActiveChange={onActiveChange} />
                 </div>
               ) : null}
             </>
@@ -221,13 +235,14 @@ export function TimeTrackingPage() {
         {entries === null ? <Spinner /> : entries.length === 0 ? <EmptyState icon="clock" title="No time logged yet" /> : (
           <div className="overflow-x-auto">
             <table className="w-full">
-              <thead><tr><th className="table-head">Task</th><th className="table-head">Project</th>{scope === 'project' ? <th className="table-head">Person</th> : null}<th className="table-head">Started</th><th className="table-head">Source</th><th className="table-head text-right">Hours</th><th className="table-head w-12" /></tr></thead>
+              <thead><tr><th className="table-head">Task</th><th className="table-head">Project</th>{scope === 'project' ? <th className="table-head">Person</th> : null}<th className="table-head">Stage</th><th className="table-head">Started</th><th className="table-head">Source</th><th className="table-head text-right">Hours</th><th className="table-head w-12" /></tr></thead>
               <tbody>
                 {entries.map((e) => (
                   <tr key={e.id} className="border-b border-line last:border-b-0">
                     <td className="table-cell"><Link to={`/tasks/${e.task_id}`} className="font-semibold text-ink hover:underline">{e.task_title}</Link>{e.note ? <p className="text-xs text-muted">{e.note}</p> : null}</td>
                     <td className="table-cell">{e.project_name}</td>
                     {scope === 'project' ? <td className="table-cell">@{e.username}</td> : null}
+                    <td className="table-cell">{e.stage_name ?? <span className="text-muted">—</span>}</td>
                     <td className="table-cell whitespace-nowrap">{formatDateTime(e.started_at)}</td>
                     <td className="table-cell">{e.is_running ? <Badge tone="ok" icon={e.is_paused ? 'pause' : 'play'}>{e.is_paused ? 'Paused' : 'Running'} {formatDuration(e.elapsed_seconds)}</Badge> : <Badge tone="neutral" icon={e.source === 'timer' ? 'clock' : 'edit'}>{e.source === 'timer' ? 'Timer' : 'Manual'}</Badge>}</td>
                     <td className="table-cell text-right font-bold tabular-nums text-ink">{formatHours(e.duration_hours)}</td>
@@ -252,6 +267,11 @@ export function TimeTrackingPage() {
           <Field label="Task" htmlFor="me-task">
             <Select id="me-task" value={manualTask} onChange={setManualTask} options={(myTasks ?? []).map((t) => ({ value: t.id, label: t.title }))} />
           </Field>
+          {manualStages.length > 0 ? (
+            <Field label="Cost stage (optional)" htmlFor="me-stage">
+              <Select id="me-stage" value={manualStage} onChange={setManualStage} options={[{ value: '', label: 'No stage' }, ...manualStages.map((s) => ({ value: s.id, label: s.stage_name }))]} />
+            </Field>
+          ) : null}
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Hours" htmlFor="me-hours" hint="0.25 to 24"><input id="me-hours" className="input" type="number" min={0.25} max={24} step="0.25" value={hours} onChange={(e) => setHours(e.target.value)} /></Field>
             <Field label="Date" htmlFor="me-date"><input id="me-date" className="input" type="date" value={date} max={todayIso()} onChange={(e) => setDate(e.target.value)} /></Field>

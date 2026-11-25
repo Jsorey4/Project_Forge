@@ -174,7 +174,7 @@ Implement these rules together with the requirements. "Server" means the FastAPI
 
 | Use case | Rules and outcomes | Source |
 | --- | --- | --- |
-| UC-01 Manage project costs | Check financial access before reading or editing; on denial, show "access denied" and return no restricted data. Show bids, budgets, expenses, and stage costs separately, with the permitted total. Validate edits before saving: invalid input shows the error and keeps the entered values; revoked permission stops without saving; a failed save keeps the input and offers retry or cancel. The total is the sum of permitted stage costs; label a partial sum **subtotal**. Never add bids, budgets, and expenses together. Adding an expense requires category, description, amount, and date, and rechecks access. Search, filter, and sort apply only to permitted rows. | EX, SEQ "Manage project costs" (Jon) |
+| UC-01 Manage project costs | Check financial access before reading or editing; on denial, show "access denied" and return no restricted data. Show bids, budgets, expenses, and stage costs separately, with the permitted total. Validate edits before saving: invalid input shows the error and keeps the entered values; revoked permission stops without saving; a failed save keeps the input and offers retry or cancel. The total is the sum of permitted stage costs; label a partial sum **subtotal**. Never add bids, budgets, and expenses together. Adding an expense requires category, description, amount, and date, and rechecks access. Search, filter, and sort apply only to permitted rows. A "Labor breakdown" card compares, per stage, the hourly rate and estimated hours against the finished hours tagged with that stage (rate x hours, rounded once half-up to the cent); it is a comparison only and is never added into the stage-cost total or any other total, and a missing input shows **N/A**. | EX, SEQ "Manage project costs" (Jon) |
 | UC-02 Review project performance | Check report access first. Resolve permitted projects, people, and fields before retrieving data. Validate the selected period. Managers see authorized team or individual hours; staff see only their own. Report estimated, assigned, and actual hours separately for the period. No matching records → empty report. Missing input or undefined metric → **N/A**. Load failure → retry or cancel. Out-of-scope requests are denied and change no data. | EX, SEQ "Review project performance" (Jon) |
 | UC-04 Track time | Start or stop a timer on a task and persist its start, end, and duration. Duration is end time minus start time, excluding paused intervals. After saving, update the timer and the recent time records. | SEQ "Track time and export records" (Preethi) |
 | UC-05, UC-06 Create or edit a soft deadline | Select a task that has a final due date and enter the soft deadline's date, time, and priority. The soft deadline must be earlier than the final due date. An invalid date shows an error and asks for a new date (create) or keeps the original value (edit). Save within **5 seconds**; otherwise retry and warn the user. Display the saved date and priority. | HL, EX (Preethi); SE-NFR-04 |
@@ -295,7 +295,7 @@ The wireframes add Create account, Reset password, Notifications, and Time track
 - Compositions (the part is deleted with its whole): User ◆ Dashboard, Dashboard ◆ Widget, Project ◆ TaskList, TaskList ◆ Task, Task ◆ Comment.
 - Operations to implement: `Membership.canAssignTasks()`, `Widget.overlaps(other)`, `Widget.moveTo(x, y)`, `Widget.hide()`, `Dashboard.restoreDefault()`, `Task.assignTo(member)`, `Task.moveTo(list, position)`, `User.unlockAccount(token)`, `ExportJob.generateFile()`, `ExportJob.sendToSheets()`.
 
-**Current schema (`supabase/migrations/0001_initial_schema.sql`, `0002_security_hardening.sql`).** It has 13 tables. `backend/app/models/entities.py` describes the same tables.
+**Current schema (`supabase/migrations/0001_initial_schema.sql`, `0002_security_hardening.sql`, `0003_stage_labor.sql`).** It has 13 tables. `backend/app/models/entities.py` describes the same tables.
 
 | Class | Table | Notes |
 | --- | --- | --- |
@@ -307,8 +307,8 @@ The wireframes add Create account, Reset password, Notifications, and Time track
 | Comment, Notification | `comments`, `notifications` | |
 | Dashboard, Widget | `dashboard_widgets` | One row per widget per user. |
 | — | `soft_deadlines` | Task, date and time, priority, completed. |
-| — | `project_financials`, `stage_costs`, `expenses` | Bid and budget, stage costs, and expenses, kept separate (see `docs/decisions/004-financial-precision-and-stage-costs.md`). |
-| — | `time_entries` | At most one running timer per person (enforced by the database). |
+| — | `project_financials`, `stage_costs`, `expenses` | Bid and budget, stage costs, and expenses, kept separate (see `docs/decisions/004-financial-precision-and-stage-costs.md`). `stage_costs` also holds an optional hourly rate and estimated hours for the labor comparison, which is never added into a total. |
+| — | `time_entries` | At most one running timer per person (enforced by the database). Each entry can name the cost stage (`stage_cost_id`) it was worked on; a trigger rejects a stage from another project. |
 | ExportJob | — | Exports are generated on request and not stored. |
 
 The prototype tables in the hosted Supabase project (`docs/SupabaseScreenshot.png`) are superseded. In particular, no `Login Page`, `Sidebar`, `templates`, `pages`, or `events` tables exist, and none should be added without a requirement.
