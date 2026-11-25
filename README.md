@@ -522,6 +522,10 @@ To update after a merge, run this on the Pi. It does nothing when there is no ne
 deploy/pi/update.sh
 ```
 
+**What the live site shows.** The live site is one shared deployment of `main`; everyone who opens the URL sees the same site and the same data. A change reaches it only after it is merged to `main` and `deploy/pi/update.sh` is run on the Pi. Nothing runs that script automatically, so a merge alone does not change the live site. To see your own changes before they are merged, run the backend and the web app on your own machine (see [Setup](#setup): `uvicorn` and `npm run dev`). That copy uses its own local SQLite database and never touches the live site.
+
+A merged change that raises `SQLITE_SCHEMA_VERSION` in `backend/app/core/database.py` makes the Pi rebuild its demo database from the seed on the next update. The old file is kept in the data volume as `projectforge.db.bak-v<old version>`, but anything created on the live site is gone from the live data.
+
 To run the production image locally (Docker or Colima):
 
 ```bash
