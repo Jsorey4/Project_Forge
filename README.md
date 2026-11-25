@@ -40,7 +40,7 @@ As of this revision, the repository contains a working full-stack MVP: a React w
 | `web/` | React + TypeScript single-page application (Vite, Tailwind CSS). |
 | `backend/` | FastAPI application server: one router per requirement area, shared security and permission code, tests. |
 | `supabase/migrations/`, `supabase/seed.sql` | PostgreSQL schema, RLS policies, and triggers (the database source of truth), plus demo seed data. |
-| `Dockerfile`, `render.yaml`, `.dockerignore` | Single-container production image (built web app plus FastAPI) and a Render Blueprint. Proposed in ADR 006; the image builds and runs locally; not yet deployed. |
+| `Dockerfile`, `docker-compose.yml`, `deploy/pi/`, `.dockerignore` | Single-container production image (built web app plus FastAPI), plus the Compose stack and update script for the Raspberry Pi. Proposed in ADR 006; the stack runs on the Pi on `127.0.0.1:8000`, with the public route still to be added. |
 | `docs/decisions/` | Architecture decision records (ADR 001–004, 006). |
 | `docs/fullstack-mvp/TEAM_HANDOFF.md` | Per-area file guide, demo script, and known limits for the MVP. |
 | `docs/frontend-comparison.md` | Review of the two candidate frontends and the bugs found in this MVP. |
@@ -263,7 +263,7 @@ The Logical, Physical, and Development views in `docs/ProjectForge System Archit
 | Application server | **FastAPI** in `backend/app/`: one router per area in `routers/`, request and response shapes in `schemas/dto.py`, tables in `models/entities.py`. `core/` provides sign-in (bcrypt passwords, signed JWT sessions, TOTP 2FA, lockout, rate limits), permission checks (`permissions.py`), the live-update hub (`realtime.py`, one WebSocket at `/ws`), Markdown and spreadsheet sanitizing (`sanitizer.py`), HTTPS and security headers, and a development email outbox. Exports (`.ics`, `.xlsx`) are generated here. |
 | Data | **PostgreSQL** with **RLS on every table**, guard triggers, and indexes, all created by `supabase/migrations/`. The backend connects with a server role and enforces permissions itself; RLS and triggers hold the same rules for anyone reaching the database directly. Without `DATABASE_URL`, the backend uses a local **SQLite** file for demos and tests. SQLite has no RLS, so production must use PostgreSQL. |
 | Integrations | Downloadable iCal `.ics` files and `.xlsx` workbooks. Google Calendar and Outlook export currently build per-event "add to calendar" links, and Google Sheets export builds a values payload; no Google or Microsoft account is connected yet. SMTP email for unlock links and deadline reminders is planned; the development outbox stands in for it. |
-| Build and delivery | *Proposed (ADR 006):* one Docker web service on Render serving the API and the built web app, with the database on Supabase. *Planned:* GitHub Actions running backend tests, web tests, and the web build on every pull request. CI does not exist yet. |
+| Build and delivery | *Proposed (ADR 006, revised):* one Docker container on a Raspberry Pi 5 serving the API and the built web app, reached through a Cloudflare Tunnel. The database is SQLite on a volume, or Supabase through `DATABASE_URL`. *Planned:* GitHub Actions running backend tests, web tests, and the web build on every pull request. CI does not exist yet. |
 
 **Layer rule:** each layer uses only the layer below it plus `shared/`.
 
@@ -495,12 +495,32 @@ The web app reads only the optional `VITE_API_URL`.
 
 ### Deploy (proposed, ADR 006)
 
-One container serves the web app, `/api`, and `/ws` from a single origin. Render rebuilds it on every push to the tracked branch (`main`).
+One container serves the web app, `/api`, and `/ws` from a single origin. The host is a Raspberry Pi 5 reached through a Cloudflare Tunnel.
 
-1. In Render, choose **New → Blueprint**, connect this GitHub repository, and select `render.yaml`.
-2. `DATABASE_URL`: leave blank for a demo on SQLite inside the container (data is re-seeded on every deploy or restart), or enter the Supabase session-pooler connection string after applying `supabase/migrations/` in order.
-3. `FRONTEND_URL` is optional; it defaults to Render's `RENDER_EXTERNAL_URL`.
-4. Check `https://<service>.onrender.com/api/health`. It reports `"database": "sqlite"` or `"postgresql"`.
+The Pi needs Docker Engine with the Compose plugin, Git, and `cloudflared` running as a service with a tunnel on a domain that Cloudflare manages. Keep SSH on Tailscale; the stack opens no router port.
+
+1. Clone the repository on the Pi and enter it.
+2. Create `backend/.env` (Git ignores it) from `backend/.env.example`. Set `JWT_SECRET` to at least 32 random characters (`openssl rand -hex 32`) and `FRONTEND_URL` to the public origin, for example `https://<hostname>`. Leave `DATABASE_URL` blank for SQLite on the `projectforge-data` volume, or set the Supabase session-pooler connection string after applying `supabase/migrations/` in order. `docker-compose.yml` fixes `ENVIRONMENT`, `FORCE_HTTPS`, `SQLITE_PATH`, and `FORWARDED_ALLOW_IPS`, so values for those in `.env` have no effect.
+3. Start it. The first build runs on the Pi's CPU and takes a while:
+
+```bash
+docker compose up -d --build
+```
+
+4. Check the container on the Pi. The header stands in for the TLS that Cloudflare terminates; without it the app redirects to HTTPS:
+
+```bash
+curl -s -H 'X-Forwarded-Proto: https' http://127.0.0.1:8000/api/health
+```
+
+5. In the Cloudflare dashboard, open the tunnel's **Routes** (Published application) and add a route: your hostname, type `HTTP`, URL `localhost:8000`. Saving creates the proxied `CNAME`. Do not put Cloudflare Access in front of it, or graders meet a login screen. If the hostname already has an `A` record, delete it first.
+6. Check `https://<hostname>/api/health`. It reports `"database": "sqlite"` or `"postgresql"`.
+
+To update after a merge, run this on the Pi. It does nothing when there is no new commit. A timer or CI job to run it automatically is not set up yet:
+
+```bash
+deploy/pi/update.sh
+```
 
 To run the production image locally (Docker or Colima):
 
@@ -508,7 +528,7 @@ To run the production image locally (Docker or Colima):
 docker build -t projectforge:local . && docker run --rm -p 8080:8000 -e ENVIRONMENT=production -e JWT_SECRET=$(openssl rand -hex 32) -e DEMO_MODE=true -e FORCE_HTTPS=false projectforge:local
 ```
 
-`DEMO_MODE=true` shows the demo accounts publicly. Verified 2026-11-24: the image builds and, run locally on SQLite, serves the landing page, login, dashboard, and live WebSocket on one port. The Render deploy and the Supabase connection have not been run.
+`DEMO_MODE=true` shows the demo accounts publicly. Verified 2026-11-24: the image builds and, run locally on SQLite, serves the landing page, login, dashboard, and live WebSocket on one port. Also verified 2026-11-24 on a MacBook (Colima, arm64): the Compose stack reports healthy, rate-limits on the address Cloudflare would append to `X-Forwarded-For` even when a client forges the header, and keeps its SQLite data across `docker compose down` and `up`. The same checks passed on the Pi itself (Debian 12, arm64), where the app is also unreachable from other devices on the home network. The Cloudflare route to this app, `deploy/pi/update.sh`, and the Supabase connection have not been run.
 
 **Database:** for PostgreSQL or Supabase, apply `supabase/migrations/` in order, then optionally `supabase/seed.sql`, and set `DATABASE_URL`.
 

@@ -145,10 +145,7 @@ def get_settings() -> Settings:
         seed_demo_data=_bool("SEED_DEMO_DATA", True),
         demo_password=os.getenv("DEMO_PASSWORD", "ProjectForge!1"),
         demo_mfa_code=os.getenv("DEMO_MFA_CODE", "123456"),
-        # Render sets RENDER_EXTERNAL_URL to the service's public https origin, so a deploy needs no manual value.
-        frontend_url=(
-            os.getenv("FRONTEND_URL") or os.getenv("RENDER_EXTERNAL_URL") or "http://localhost:5173"
-        ).rstrip("/"),
+        frontend_url=os.getenv("FRONTEND_URL", "http://localhost:5173").rstrip("/"),
         frontend_dist=Path(os.getenv("FRONTEND_DIST", str(PROJECT_ROOT / "web" / "dist"))),
         # SE-NFR-06: HTTPS redirect + HSTS. On by default whenever demo mode is off.
         force_https=_bool("FORCE_HTTPS", not demo_mode),
