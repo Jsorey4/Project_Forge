@@ -522,16 +522,22 @@ class CalendarExportRequest(BaseModel):
     include_soft_deadlines: bool = True
 
 
-class ProviderLink(BaseModel):
-    title: str
-    starts_at: UTCDateTimeOut
-    url: str
+class CalendarAuthorization(BaseModel):
+    authorization_url: str
+    ticket: str
+    state: str
+
+
+class CalendarCallback(BaseModel):
+    code: str = Field(min_length=1, max_length=8192)
+    state: str = Field(min_length=1, max_length=128)
+    ticket: str = Field(min_length=1, max_length=2048)
 
 
 class CalendarExportResult(BaseModel):
     message: str
     count: int
-    provider_links: list[ProviderLink]
+    already_present: int
 
 
 SpreadsheetSection = Literal["tasks", "soft_deadlines", "time_entries", "financials", "stage_costs", "expenses"]

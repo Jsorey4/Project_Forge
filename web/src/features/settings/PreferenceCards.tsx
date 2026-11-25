@@ -3,10 +3,7 @@
  * @description The "Notification preferences" and "Connections" cards on Profile & settings.
  *   Notification preferences: four switches (task assignments, mentions, deadline reminders, project
  *   updates) saved to the user's profile the moment they are flipped; the server reads the same values
- *   before it creates a notification, so a muted kind is never delivered. Connections: Google Calendar,
- *   Outlook and Google Sheets, each showing "Connected" or a Connect button. Connecting records the user's
- *   consent for one-way exports (calendar deadlines, spreadsheet data) so the export dialog does not ask
- *   again; no OAuth tokens are stored and nothing is ever imported.
+ *   before it creates a notification, so a muted kind is never delivered. Calendar preferences skip the local confirmation before provider sign-in.
  * @traces SE-FR-19, SE-FR-20, SE-FR-29, UC-14, UC-15, UC-22
  */
 import { useState, type ReactNode } from 'react';
@@ -25,8 +22,8 @@ export const NOTIFICATION_SWITCHES: { key: keyof NotificationPrefs; label: strin
 ];
 
 export const CONNECTIONS: { provider: ConnectedProvider; label: string; hint: string }[] = [
-  { provider: 'google_calendar', label: 'Google Calendar', hint: 'Export deadlines as events' },
-  { provider: 'outlook', label: 'Outlook', hint: 'Export deadlines as events' },
+  { provider: 'google_calendar', label: 'Google Calendar', hint: 'Skip the ProjectForge confirmation before provider sign-in' },
+  { provider: 'outlook', label: 'Outlook', hint: 'Skip the ProjectForge confirmation before provider sign-in' },
   { provider: 'google_sheets', label: 'Google Sheets', hint: 'Export project data to a new sheet' },
 ];
 
@@ -92,27 +89,29 @@ export function ConnectedAccountsCard() {
         {CONNECTIONS.map(({ provider, label, hint }) => {
           const account = user.connected_accounts[provider];
           const busy = pending === provider;
+          const enable = provider === 'google_sheets' ? 'Connect' : 'Enable';
+          const disable = provider === 'google_sheets' ? 'Disconnect' : 'Disable';
           return (
             <PrefRow key={provider} label={label} hint={account.connected && account.connected_at ? `${hint} · since ${formatDate(account.connected_at)}` : hint}>
               {account.connected ? (
                 <div className="flex shrink-0 items-center gap-2">
                   <span className="btn-sm inline-flex items-center gap-1.5 rounded-btn border border-ok/40 bg-ok/15 font-semibold text-ok" data-testid={`conn-${provider}`}>
-                    <Icon name="check" className="h-3.5 w-3.5" /> Connected
+                    <Icon name="check" className="h-3.5 w-3.5" /> {provider === 'google_sheets' ? 'Connected' : 'Enabled'}
                   </span>
-                  <button type="button" className="btn-secondary btn-sm" disabled={busy} aria-label={`Disconnect ${label}`} onClick={() => void patch(provider, { connected_accounts: { [provider]: false } })}>
-                    {busy ? '…' : 'Disconnect'}
+                  <button type="button" className="btn-secondary btn-sm" disabled={busy} aria-label={`${disable} ${label}`} onClick={() => void patch(provider, { connected_accounts: { [provider]: false } })}>
+                    {busy ? '…' : disable}
                   </button>
                 </div>
               ) : (
-                <button type="button" className="btn-primary btn-sm shrink-0" disabled={busy} aria-label={`Connect ${label}`} onClick={() => void patch(provider, { connected_accounts: { [provider]: true } })}>
-                  {busy ? 'Connecting…' : 'Connect'}
+                <button type="button" className="btn-primary btn-sm shrink-0" disabled={busy} aria-label={`${enable} ${label}`} onClick={() => void patch(provider, { connected_accounts: { [provider]: true } })}>
+                  {busy ? 'Saving…' : enable}
                 </button>
               )}
             </PrefRow>
           );
         })}
       </div>
-      <p className="mt-3 text-[13px] text-muted">Connecting allows one-way exports from ProjectForge; nothing is imported back. Each export only sends the data your role can see.</p>
+      <p className="mt-3 text-[13px] text-muted">Google Calendar and Outlook ask you to authorize access when you export deadlines.</p>
     </Card>
   );
 }

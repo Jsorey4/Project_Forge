@@ -1,8 +1,8 @@
 """
 @author: Saaqib Shaik
 @description: Exports a project's deadlines to a calendar and its data to a spreadsheet. Calendar export
-    builds a standards-compliant .ics file (RFC 5545) or, after the user explicitly consents, ready-made
-    "add to Google Calendar / Outlook" links; if consent is declined nothing is shared. Spreadsheet export
+    builds a standards-compliant .ics file (RFC 5545) or creates events through Google Calendar or Microsoft Graph
+    after the member authorizes the export. Spreadsheet export
     builds an .xlsx workbook (or a Google Sheets values payload) containing only what the caller's role
     may see - members never get financial sheets or other people's hours - and every text cell is
     neutralised against formula injection first. Exporting nothing returns "Nothing to export".
@@ -14,10 +14,9 @@ from __future__ import annotations
 import io
 import re
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime
 from decimal import Decimal
 from typing import Any
-from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from openpyxl import Workbook
@@ -26,6 +25,8 @@ from openpyxl.utils import get_column_letter
 from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
 
+from app.core import calendar_providers
+from app.core.calendar_providers import Deadline, EVENT_LENGTH
 from app.core.database import get_db, utcnow
 from app.core.permissions import ALL_ROLES, MANAGERS, require_project_role
 from app.core.sanitizer import clean_text, sanitize_spreadsheet_cell
@@ -34,7 +35,8 @@ from app.models.entities import Expense, Project, ProjectFinancials, SoftDeadlin
 from app.schemas.dto import (
     CalendarExportRequest,
     CalendarExportResult,
-    ProviderLink,
+    CalendarAuthorization,
+    CalendarCallback,
     SheetPayload,
     SheetsExportResult,
     SpreadsheetExportRequest,
@@ -44,22 +46,12 @@ router = APIRouter(prefix="/api/projects/{project_id}/export", tags=["exports"])
 
 NOTHING_TO_EXPORT = "Nothing to export"
 CONSENT_DECLINED = "Export cancelled: calendar access was not authorized, so no data was shared."
-EVENT_LENGTH = timedelta(minutes=30)
 XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 
 # ---------------------------------------------------------------------------
 # Calendar export (UC-14)
 # ---------------------------------------------------------------------------
-@dataclass
-class Deadline:
-    uid: str
-    title: str
-    starts_at: datetime
-    description: str
-    category: str
-
-
 def _safe_filename(name: str) -> str:
     cleaned = re.sub(r"[^A-Za-z0-9._-]+", "-", name).strip("-")
     return (cleaned or "project")[:60]
@@ -186,31 +178,6 @@ def build_ics(project: Project, deadlines: list[Deadline]) -> str:
     return "\r\n".join(folded) + "\r\n"
 
 
-def provider_link(target: str, d: Deadline) -> str:
-    end = d.starts_at + EVENT_LENGTH
-    if target == "google":
-        query = urlencode(
-            {
-                "action": "TEMPLATE",
-                "text": d.title,
-                "dates": f"{_ics_time(d.starts_at)}/{_ics_time(end)}",
-                "details": d.description,
-            }
-        )
-        return f"https://calendar.google.com/calendar/render?{query}"
-    query = urlencode(
-        {
-            "path": "/calendar/action/compose",
-            "rru": "addevent",
-            "subject": d.title,
-            "startdt": d.starts_at.isoformat(timespec="seconds") + "Z",
-            "enddt": end.isoformat(timespec="seconds") + "Z",
-            "body": d.description,
-        }
-    )
-    return f"https://outlook.live.com/calendar/0/deeplink/compose?{query}"
-
-
 def _project(db: Session, project_id: str) -> Project:
     project = db.get(Project, project_id)
     if project is None:
@@ -218,7 +185,7 @@ def _project(db: Session, project_id: str) -> Project:
     return project
 
 
-@router.post("/calendar", response_model=CalendarExportResult)
+@router.post("/calendar", response_model=CalendarAuthorization)
 def export_calendar(
     project_id: str, body: CalendarExportRequest, user: UserProfile = Depends(get_current_user), db: Session = Depends(get_db)
 ):
@@ -241,9 +208,21 @@ def export_calendar(
                 "Access-Control-Expose-Headers": "Content-Disposition, X-Export-Count",
             },
         )
-    links = [ProviderLink(title=d.title, starts_at=d.starts_at, url=provider_link(body.target, d)) for d in deadlines]
-    noun = "deadline" if len(links) == 1 else "deadlines"
-    return CalendarExportResult(message=f"{len(links)} {noun} added", count=len(links), provider_links=links)
+    return calendar_providers.authorize(user.id, project_id, body)
+
+
+@router.post("/calendar/complete", response_model=CalendarExportResult)
+def complete_calendar_export(
+    project_id: str, body: CalendarCallback, user: UserProfile = Depends(get_current_user), db: Session = Depends(get_db)
+):
+    require_project_role(db, user.id, project_id, ALL_ROLES)
+    selection, verifier = calendar_providers.verify_callback(user.id, project_id, body)
+    deadlines = collect_deadlines(db, _project(db, project_id), selection)
+    if not deadlines:
+        raise HTTPException(status_code=400, detail=NOTHING_TO_EXPORT)
+    # Release the read transaction and connection before waiting on the calendar provider.
+    db.close()
+    return calendar_providers.publish(selection.target, body.code, verifier, deadlines)
 
 
 # ---------------------------------------------------------------------------

@@ -216,16 +216,16 @@ export type CalendarTarget = 'ical' | 'google' | 'outlook';
 export type SpreadsheetTarget = 'excel' | 'sheets';
 export type SpreadsheetSection = 'tasks' | 'soft_deadlines' | 'time_entries' | 'financials' | 'stage_costs' | 'expenses';
 
-export interface ProviderLink {
-  title: string;
-  starts_at: string;
-  url: string;
+export interface CalendarAuthorization {
+  authorization_url: string;
+  ticket: string;
+  state: string;
 }
 
 export interface CalendarExportResult {
   message: string;
   count: number;
-  provider_links: ProviderLink[];
+  already_present: number;
 }
 
 export interface SheetsExportResult {

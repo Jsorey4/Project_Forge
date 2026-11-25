@@ -2,8 +2,7 @@
  * @author Saaqib Shaik
  * @description The export dialog. Calendar tab: choose which deadlines to include and a destination; for
  *   Google / Outlook the user must explicitly allow access first - declining cancels without sharing
- *   anything. A provider already connected in Settings > Connections counts as that consent, so the
- *   prompt is skipped. Spreadsheet tab: choose sheets; financial sheets are only offered to owners and managers
+ *   anything. The external provider authorizes every export. Spreadsheet tab: choose sheets; financial sheets are only offered to owners and managers
  *   (the server enforces the same rule). Shows "Nothing to export" and success counts from the server.
  *   If an export fails the choices stay as they were and the dialog offers Retry or Cancel; it never
  *   reports success for an export that did not happen.
@@ -11,9 +10,8 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import { useAuth } from '../auth/AuthProvider';
-import type { CalendarExportResult, Role, SheetsExportResult, SpreadsheetSection } from '../../shared/types';
+import type { Role, SheetsExportResult, SpreadsheetSection } from '../../shared/types';
 import { isManager } from '../../shared/permissions';
-import { formatDateTime } from '../../shared/format';
 import { Checkbox } from '../../components/Checkbox';
 import { Alert, Icon, Modal, RetryBanner, Segmented } from '../../shared/ui';
 import type { ApiError } from '../../services/apiClient';
@@ -42,7 +40,6 @@ export function ExportModal({ open, onClose, projectId, projectName, role, initi
   const [consentOpen, setConsentOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ tone: 'ok' | 'danger' | 'warn'; text: string } | null>(null);
-  const [links, setLinks] = useState<CalendarExportResult['provider_links']>([]);
   const [sheets, setSheets] = useState<SheetsExportResult | null>(null);
 
   useEffect(() => {
@@ -58,7 +55,6 @@ export function ExportModal({ open, onClose, projectId, projectName, role, initi
 
   const reset = () => {
     setMessage(null);
-    setLinks([]);
     setSheets(null);
     setFailure(null);
   };
@@ -80,7 +76,7 @@ export function ExportModal({ open, onClose, projectId, projectName, role, initi
     }
   };
 
-  const providerConnected =
+  const skipConfirmation =
     target === 'google' ? !!user?.connected_accounts.google_calendar.connected : target === 'outlook' ? !!user?.connected_accounts.outlook.connected : false;
 
   const exportCalendar = () => {
@@ -89,8 +85,8 @@ export function ExportModal({ open, onClose, projectId, projectName, role, initi
         const { count, filename } = await exportController.downloadIcs(projectId, includes);
         setMessage({ tone: 'ok', text: `${count} deadline${count === 1 ? '' : 's'} saved to ${filename}` });
       });
-    } else if (providerConnected) {
-      answerConsent(true);  // consent was given when the account was connected in Settings
+    } else if (skipConfirmation) {
+      answerConsent(true);
     } else {
       setConsentOpen(true);
     }
@@ -98,11 +94,12 @@ export function ExportModal({ open, onClose, projectId, projectName, role, initi
 
   const answerConsent = (allow: boolean) => {
     setConsentOpen(false);
-    void run(async () => {
-      const result = await exportController.toProvider(projectId, target as 'google' | 'outlook', allow, includes);
-      setMessage({ tone: 'ok', text: result.message });
-      setLinks(result.provider_links);
-    });
+    if (!allow) {
+      reset();
+      setMessage({ tone: 'warn', text: 'Export cancelled. No deadlines were shared.' });
+      return;
+    }
+    if (target !== 'ical') void run(() => exportController.toProvider(projectId, target, includes));
   };
 
   const exportSheet = (kind: 'excel' | 'sheets') =>
@@ -123,13 +120,13 @@ export function ExportModal({ open, onClose, projectId, projectName, role, initi
   return (
     <Modal open={open} onClose={onClose} title={`Export · ${projectName}`} wide>
       <div className="space-y-5">
-        <Segmented ariaLabel="Export type" value={tab} onChange={(t) => { setTab(t); reset(); }} options={[{ value: 'calendar', label: 'Calendar' }, { value: 'spreadsheet', label: 'Spreadsheet' }]} />
+        <Segmented ariaLabel="Export type" value={tab} onChange={(t) => { setTab(t); setConsentOpen(false); reset(); }} options={[{ value: 'calendar', label: 'Calendar' }, { value: 'spreadsheet', label: 'Spreadsheet' }]} />
         {message ? <Alert tone={message.tone} onClose={() => setMessage(null)}>{message.text}</Alert> : null}
         <RetryBanner
           error={failure}
           busy={busy}
           title="The export did not finish."
-          hint="Nothing was exported and your choices are kept - retry now or cancel."
+          hint="Your export choices have been kept."
           onRetry={() => lastAttempt.current && void run(lastAttempt.current)}
           onCancel={() => setFailure(null)}
         />
@@ -154,7 +151,7 @@ export function ExportModal({ open, onClose, projectId, projectName, role, initi
                   ['google', 'Google Calendar', 'Requires your permission'],
                   ['outlook', 'Outlook', 'Requires your permission'],
                 ] as [CalTarget, string, string][]).map(([value, label, hint]) => (
-                  <button key={value} type="button" onClick={() => setTarget(value)} aria-pressed={target === value}
+                  <button key={value} type="button" onClick={() => { setTarget(value); setConsentOpen(false); reset(); }} aria-pressed={target === value}
                     className={`rounded-lg border p-3 text-left ${target === value ? 'border-brand bg-brand/5' : 'border-line hover:bg-surface-2'}`}>
                     <span className="block text-sm font-semibold">{label}</span>
                     <span className="block text-xs text-muted">{hint}</span>
@@ -164,38 +161,23 @@ export function ExportModal({ open, onClose, projectId, projectName, role, initi
             </fieldset>
             {consentOpen ? (
               <div className="rounded-xl border border-brand/40 bg-brand/5 p-4" role="alertdialog" aria-label="Calendar permission">
-                <p className="flex items-center gap-2 font-semibold"><Icon name="shield" /> Allow ProjectForge to add events to {providerName}?</p>
-                <p className="mt-1 text-sm text-muted">Only the deadlines selected above are shared. Declining cancels the export and nothing leaves ProjectForge.</p>
+                <p className="flex items-center gap-2 font-semibold"><Icon name="shield" /> Continue to {providerName}?</p>
+                <p className="mt-1 text-sm text-muted">Choose your account and authorize ProjectForge to add the selected deadlines.</p>
                 <div className="mt-3 flex gap-2">
-                  <button type="button" className="btn-primary" onClick={() => answerConsent(true)}>Allow</button>
+                  <button type="button" className="btn-primary" onClick={() => answerConsent(true)}>Continue</button>
                   <button type="button" className="btn-secondary" onClick={() => answerConsent(false)}>Decline</button>
                 </div>
               </div>
             ) : (
               <div className="space-y-2">
-                {providerConnected ? (
-                  <p className="flex items-center gap-1.5 text-xs text-ok"><Icon name="check" className="h-3.5 w-3.5" /> Using your connected {providerName} account (Settings &gt; Connections).</p>
+                {skipConfirmation ? (
+                  <p className="flex items-center gap-1.5 text-xs text-ok"><Icon name="check" className="h-3.5 w-3.5" /> You’ll authorize this export with {providerName}.</p>
                 ) : null}
                 <button type="button" className="btn-primary" onClick={exportCalendar} disabled={busy}>
                   <Icon name="download" /> {busy ? 'Exporting…' : 'Export deadlines'}
                 </button>
               </div>
             )}
-            {links.length > 0 ? (
-              <ul className="divide-y divide-line rounded-lg border border-line">
-                {links.map((l) => (
-                  <li key={l.url} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
-                    <span className="min-w-0">
-                      <span className="block truncate font-medium">{l.title}</span>
-                      <span className="text-xs text-muted">{formatDateTime(l.starts_at)}</span>
-                    </span>
-                    <a href={l.url} target="_blank" rel="noopener noreferrer" className="btn-secondary shrink-0 py-1 text-xs">
-                      Add <Icon name="external" className="h-3 w-3" />
-                    </a>
-                  </li>
-                ))}
-              </ul>
-            ) : null}
           </div>
         ) : (
           <div className="space-y-4">

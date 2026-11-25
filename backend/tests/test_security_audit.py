@@ -705,7 +705,7 @@ def test_uc15_every_string_cell_that_could_be_a_formula_is_prefixed_se_fr20(clie
                     assert value.lstrip(" \u200b")[:1] not in ("=", "+", "-", "@", "\t", "\r", "\n"), (sheet["title"], value)
 
 
-def test_uc14_calendar_export_cannot_be_used_to_inject_ics_properties_se_fr19(client):
+def test_uc14_calendar_export_cannot_be_used_to_inject_ics_properties_se_fr19(client, monkeypatch):
     assert _ics_escape("a\r\nATTACH:http://evil.example/x") == "a\\nATTACH:http://evil.example/x"
     assert _ics_escape("lone\rCR and lone\nLF") == "lone\\nCR and lone\\nLF"
     assert _ics_escape("semi;colon, comma\\slash") == "semi\\;colon\\, comma\\\\slash"
@@ -755,9 +755,13 @@ def test_uc14_calendar_export_cannot_be_used_to_inject_ics_properties_se_fr19(cl
     # The pure builder gives the same guarantee for any input.
     forged = build_ics(project_row, [Deadline(uid="u@projectforge", title="t\r\nATTACH:x", starts_at=future(1), description="d\rORGANIZER:x", category="c\nX:1")])
     assert "\r\nATTACH" not in forged and "\r\nORGANIZER" not in forged and "\r\nX:1" not in forged
-    # The provider links carry the same titles URL-encoded, never as raw control characters.
-    google = client.post(f"/api/projects/{pid}/export/calendar", headers=H(client, "jon"), json={"target": "google", "oauth_consent": True}).json()
-    assert all("\r" not in link["url"] and "\n" not in link["url"] and link["url"].startswith("https://calendar.google.com/") for link in google["provider_links"])
+    # Authorization URLs contain no deadline text, even before URL encoding.
+    monkeypatch.setenv("GOOGLE_CALENDAR_CLIENT_ID", "test-client")
+    monkeypatch.setenv("GOOGLE_CALENDAR_CLIENT_SECRET", "test-secret")
+    google = client.post(f"/api/projects/{pid}/export/calendar", headers=H(client, "jon"),
+                         json={"target": "google", "oauth_consent": True}).json()
+    assert google["authorization_url"].startswith("https://accounts.google.com/")
+    assert "ATTACH" not in google["authorization_url"] and "X-INJECTED" not in google["authorization_url"]
 
 
 # ---------------------------------------------------------------------------
