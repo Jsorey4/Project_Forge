@@ -1,0 +1,65 @@
+# ProjectForge on the Raspberry Pi 5 (ADR 006, revised): one container, reached only through the Cloudflare
+# Tunnel that already runs on the Pi as a systemd service (cloudflared). Nothing here opens a port to the LAN.
+# Author: Jon Sorey. Traces: SE-NFR-06 (TLS is terminated by Cloudflare), SE-NFR-08 (no cold start).
+#
+# Secrets and per-host values live in backend/.env, which Git ignores. Copy backend/.env.example, then set at
+# least JWT_SECRET (32+ characters) and FRONTEND_URL (the public https origin). See README, "Deploy".
+#
+#   docker compose up -d --build     build and start (or update) the stack
+#   docker compose logs -f app       follow the app log
+# Fixed project name, so the data volume keeps its name wherever the repository is checked out.
+name: projectforge
+
+services:
+  app:
+    build: .
+    image: projectforge:pi
+    container_name: projectforge
+    restart: unless-stopped
+    env_file: backend/.env
+    environment:
+      # Values the deployment itself fixes. `environment` wins over `env_file`, so a stray line in
+      # backend/.env cannot turn these off.
+      ENVIRONMENT: production
+      FORCE_HTTPS: "true"
+      # With a blank DATABASE_URL the app uses SQLite. The file sits on the named volume below, so the
+      # data survives restarts and rebuilds (a container's own disk would not).
+      SQLITE_PATH: /data/projectforge.db
+      # Fail loudly instead of silently switching to a throwaway database if Supabase is unreachable.
+      DB_FALLBACK_TO_SQLITE: "false"
+      # Trust X-Forwarded-* only from the host side of this network (cloudflared connects from the bridge
+      # gateway, or from 127.0.0.1). uvicorn then takes the right-most untrusted X-Forwarded-For entry, which
+      # is the address Cloudflare appended, so a client cannot dodge the per-IP rate limit by forging the
+      # header. A wildcard ("*") would trust the left-most entry, which the client controls.
+      FORWARDED_ALLOW_IPS: "127.0.0.1,172.28.0.0/24"
+    ports:
+      # Loopback only: the tunnel's route points at localhost:8000, and LAN devices cannot reach the app.
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - projectforge-data:/data
+    networks:
+      - projectforge
+    healthcheck:
+      # The header makes the HTTPS-redirect middleware treat the probe as already secure.
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import sys, urllib.request;
+          r = urllib.request.Request('http://127.0.0.1:8000/api/health', headers={'X-Forwarded-Proto': 'https'});
+          sys.exit(0 if urllib.request.urlopen(r, timeout=5).status == 200 else 1)
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+networks:
+  projectforge:
+    ipam:
+      config:
+        # Fixed subnet so FORWARDED_ALLOW_IPS above can name it.
+        - subnet: 172.28.0.0/24
+
+volumes:
+  projectforge-data:

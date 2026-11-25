@@ -118,6 +118,36 @@ export interface Member {
   done_task_count: number;
 }
 
+/** One person's overview for the People dialog (GET /api/people/{id}): only projects shared with the caller. */
+export interface PersonProject {
+  id: string;
+  name: string;
+  project_type: ProjectType;
+  status: ProjectStatus;
+  deadline: string;
+  role: Role;
+  task_count: number;
+  open_task_count: number;
+  done_task_count: number;
+}
+
+export interface PersonTask {
+  id: string;
+  project_id: string;
+  project_name: string;
+  title: string;
+  status: TaskStatus;
+  priority: TaskPriority;
+  due_date: string;
+  completed_at: string | null;
+}
+
+export interface PersonOverview {
+  user: { id: string; username: string; display_name: string; email: string; avatar_url: string | null };
+  projects: PersonProject[];
+  tasks: PersonTask[];
+}
+
 export interface Project {
   id: string;
   name: string;
@@ -340,6 +370,18 @@ export interface StageCost {
   amount: string;
   position: number;
   notes: string;
+  // Labor comparison (never part of the stage-cost total). null = not set / cannot be calculated -> "N/A".
+  hourly_rate: string | null;
+  estimated_hours: string | null;
+  actual_hours: string;
+  labor_estimated: string | null;
+  labor_actual: string | null;
+}
+
+/** A stage's name only: what any project member may see when tagging time. */
+export interface StageName {
+  id: string;
+  stage_name: string;
 }
 
 export interface Expense {
@@ -365,6 +407,9 @@ export interface CostSummary {
   expense_total: string;
   expense_count: number;
   categories: string[];
+  unstaged_hours: string;
+  labor_estimated_total: string | null;
+  labor_actual_total: string | null;
 }
 
 export interface CostQuery {
@@ -399,6 +444,8 @@ export interface TimeEntry {
   elapsed_seconds: number;
   duration_hours: number | null;
   note: string;
+  stage_cost_id: string | null;
+  stage_name: string | null;
 }
 
 export interface PerformanceRow {

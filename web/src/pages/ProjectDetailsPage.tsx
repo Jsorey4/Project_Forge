@@ -15,6 +15,7 @@ import { useRealtime } from '../services/realtimeClient';
 import { isManager, isOwner } from '../shared/permissions';
 import type { Progress, ProjectDetail, ProjectStatus, ProjectType } from '../shared/types';
 import { formatDateTime, fromLocalInput, toLocalInput } from '../shared/format';
+import { Select } from '../components/Select';
 import { AccessDenied, Alert, Avatar, AvatarStack, Card, Field, Icon, Modal, ModeBadge, PageHeader, ProgressBar, RetryBanner, RoleBadge, Spinner, StatusBadge } from '../shared/ui';
 import { toApiError, useSave } from '../shared/useSave';
 
@@ -51,8 +52,8 @@ function EditProjectModal({ project, open, onClose, onSaved }: { project: Projec
         <Field label="Name" error={save.fieldErrors.name}><input className="input" value={name} onChange={(e) => setName(e.target.value)} /></Field>
         <Field label="Description"><textarea className="input min-h-[80px]" value={description} onChange={(e) => setDescription(e.target.value)} /></Field>
         <div className="grid gap-4 sm:grid-cols-3">
-          <Field label="Status"><select className="input" value={status} onChange={(e) => setStatus(e.target.value as ProjectStatus)}>{PROJECT_STATUSES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}</select></Field>
-          <Field label="Type"><select className="input" value={type} onChange={(e) => setType(e.target.value as ProjectType)}>{PROJECT_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}</select></Field>
+          <Field label="Status" htmlFor="pd-status"><Select id="pd-status" value={status} onChange={(v) => setStatus(v as ProjectStatus)} options={PROJECT_STATUSES} /></Field>
+          <Field label="Type" htmlFor="pd-type"><Select id="pd-type" value={type} onChange={(v) => setType(v as ProjectType)} options={PROJECT_TYPES} /></Field>
           <Field label="Deadline" error={save.fieldErrors.deadline}><input type="datetime-local" className="input" value={deadline} onChange={(e) => setDeadline(e.target.value)} /></Field>
         </div>
       </div>

@@ -12,6 +12,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useAuth } from '../auth/AuthProvider';
 import type { Role, SheetsExportResult, SpreadsheetSection } from '../../shared/types';
 import { isManager } from '../../shared/permissions';
+import { Checkbox } from '../../components/Checkbox';
 import { Alert, Icon, Modal, RetryBanner, Segmented } from '../../shared/ui';
 import type { ApiError } from '../../services/apiClient';
 import { toApiError } from '../../shared/useSave';
@@ -139,9 +140,7 @@ export function ExportModal({ open, onClose, projectId, projectName, role, initi
                 ['include_task_due_dates', 'Task due dates'],
                 ['include_soft_deadlines', 'Soft deadlines'],
               ] as [keyof CalendarIncludes, string][]).map(([key, label]) => (
-                <label key={key} className="flex items-center gap-2 text-sm">
-                  <input type="checkbox" checked={includes[key]} onChange={(e) => setIncludes({ ...includes, [key]: e.target.checked })} /> {label}
-                </label>
+                <div key={key}><Checkbox label={label} checked={includes[key]} onChange={(v) => setIncludes({ ...includes, [key]: v })} /></div>
               ))}
             </fieldset>
             <fieldset>
@@ -187,11 +186,10 @@ export function ExportModal({ open, onClose, projectId, projectName, role, initi
               {SECTIONS.map((s) => {
                 const locked = s.financial && !manager;
                 return (
-                  <label key={s.value} className={`flex items-center gap-2 rounded-lg border border-line px-3 py-2 text-sm ${locked ? 'opacity-60' : ''}`}>
-                    <input type="checkbox" disabled={locked} checked={!locked && sections.includes(s.value)} onChange={() => toggleSection(s.value)} />
-                    {s.label}
+                  <div key={s.value} className="flex items-center gap-2 rounded-lg border border-line px-3 py-2 text-sm">
+                    <Checkbox label={s.label} disabled={locked} checked={!locked && sections.includes(s.value)} onChange={() => toggleSection(s.value)} />
                     {locked ? <span className="ml-auto flex items-center gap-1 text-xs text-muted"><Icon name="lock" className="h-3 w-3" /> Managers only</span> : null}
-                  </label>
+                  </div>
                 );
               })}
             </fieldset>

@@ -8,6 +8,7 @@
 import { useEffect, useState } from 'react';
 import type { ProjectDetail, ProjectStatus, ProjectType } from '../../shared/types';
 import { fromLocalInput, toLocalInput } from '../../shared/format';
+import { Select } from '../../components/Select';
 import { Alert, Badge, Field, Icon, Modal, RetryBanner } from '../../shared/ui';
 import { useSave } from '../../shared/useSave';
 import { ColorPicker } from './ColorPicker';
@@ -122,11 +123,7 @@ export function CreateProjectModal({ open, defaultType, onClose, onCreated }: Pr
             </div>
           </Field>
           <Field label="Status" error={errors.status} htmlFor="p-status">
-            <select id="p-status" className="input" value={status} onChange={(e) => setStatus(e.target.value as ProjectStatus)}>
-              {PROJECT_STATUSES.map((s) => (
-                <option key={s.value} value={s.value}>{s.label}</option>
-              ))}
-            </select>
+            <Select id="p-status" value={status} onChange={(v) => setStatus(v as ProjectStatus)} options={PROJECT_STATUSES} />
           </Field>
           <Field label="Deadline" error={errors.deadline} htmlFor="p-deadline">
             <input id="p-deadline" type="datetime-local" className="input" value={deadline} onChange={(e) => setDeadline(e.target.value)} />

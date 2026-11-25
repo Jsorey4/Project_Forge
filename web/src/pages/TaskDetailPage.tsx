@@ -23,6 +23,7 @@ import { timeController } from '../features/time-tracking/timeController';
 import { useRealtime } from '../services/realtimeClient';
 import type { Member, TaskDetail, TaskList, TaskStatus } from '../shared/types';
 import { formatDateTime, formatHours, todayIso } from '../shared/format';
+import { Select } from '../components/Select';
 import { AccessDenied, Alert, Avatar, Badge, Card, Icon, PriorityBadge, RetryBanner, RoleBadge, Spinner, StatusBadge } from '../shared/ui';
 import { toApiError, useSave } from '../shared/useSave';
 
@@ -60,7 +61,7 @@ function HoursCard({ task, onChanged }: { task: TaskDetail; onChanged: () => voi
         ) : null}
         <div className="space-y-2 border-t border-line pt-4">
           <p className="label">Timer</p>
-          <TaskTimerWidget taskId={task.id} taskTitle={task.title} canTrack={canTrack} onStopped={onChanged} />
+          <TaskTimerWidget taskId={task.id} projectId={task.project_id} taskTitle={task.title} canTrack={canTrack} onStopped={onChanged} />
         </div>
         {canTrack ? (
           <div className="space-y-2 border-t border-line pt-4">
@@ -152,9 +153,7 @@ export function TaskDetailPage() {
         </div>
         <div className="flex flex-wrap gap-2">
           {task.can_edit ? (
-            <select className="input w-auto" value={task.status} onChange={(e) => void setStatus(e.target.value as TaskStatus)} aria-label="Change status">
-              {BOARD_COLUMNS.map((c) => <option key={c.status} value={c.status}>{c.label}</option>)}
-            </select>
+            <Select className="w-auto" value={task.status} onChange={(v) => void setStatus(v as TaskStatus)} ariaLabel="Change status" options={BOARD_COLUMNS.map((c) => ({ value: c.status, label: c.label }))} />
           ) : null}
           {task.can_edit ? <button type="button" className="btn-secondary" onClick={() => setEditing(true)}><Icon name="edit" /> Edit</button> : null}
           {task.can_assign ? <button type="button" className="btn-danger" onClick={() => void remove()}><Icon name="trash" /></button> : null}

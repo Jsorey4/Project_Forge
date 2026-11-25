@@ -154,7 +154,7 @@ def get_db() -> Iterator[Session]:
 
 # Bump when a model change is not something create_all() can add to an existing SQLite file (new columns,
 # changed CHECK constraints, new unique indexes). PostgreSQL / Supabase is upgraded by supabase/migrations.
-SQLITE_SCHEMA_VERSION = 3
+SQLITE_SCHEMA_VERSION = 4
 
 
 def _refresh_outdated_sqlite_demo_db() -> None:

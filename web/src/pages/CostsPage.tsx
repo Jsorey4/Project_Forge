@@ -5,10 +5,12 @@
  *   together), the stage-cost Breakdown table, the searchable / sortable / filterable expense table, and an
  *   Export button. Members get the server's 403 "Access denied" view and no figures at all. Bid and budget
  *   edits are validated to the cent, with a Retry banner if the save cannot reach the server.
- * @traces SE-FR-01, SE-FR-02, SE-FR-03, SE-NFR-01, SE-NFR-02, SE-NFR-04, UC-01
+ *   A "Labor breakdown" card below the stage costs compares rate x hours per stage; it is never added into a total.
+ * @traces SE-FR-01, SE-FR-02, SE-FR-03, SE-FR-04, SE-NFR-01, SE-NFR-02, SE-NFR-04, UC-01
  */
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { ExpenseTable } from '../features/costs/ExpenseTable';
+import { LaborBreakdown } from '../features/costs/LaborBreakdown';
 import { StageCostTable } from '../features/costs/StageCostTable';
 import { costController } from '../features/costs/costController';
 import { isValidAmount, normalizeAmount, subtractAmounts } from '../features/costs/model';
@@ -164,6 +166,9 @@ export function CostsPage() {
               <div className="mb-3"><Alert tone="warn" title="Showing a subtotal">{summary.included_stage_ids.length} of {summary.stage_costs.length} stages are included. Tick every stage to see the project total.</Alert></div>
             ) : null}
             <StageCostTable projectId={currentProject.id} summary={summary} selected={effectiveSelected} onToggle={toggle} onToggleAll={toggleAll} onChanged={() => void load(query, selected)} />
+          </Card>
+          <Card title="Labor breakdown" actions={<span>Comparison only. Not included in the stage-cost total.</span>}>
+            <LaborBreakdown projectId={currentProject.id} summary={summary} onChanged={() => void load(query, selected)} />
           </Card>
           <Card title="Expenses" actions={<span>Search, filter and sort</span>}>
             <ExpenseTable projectId={currentProject.id} summary={summary} query={query} onQuery={onQuery} onChanged={() => void load(query, selected)} />

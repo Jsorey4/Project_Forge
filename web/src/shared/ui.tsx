@@ -422,7 +422,7 @@ export function Modal({ open, title, onClose, children, footer, wide }: { open: 
     };
     document.addEventListener('keydown', onKey);
     // First form field of the dialog, or its first button when it has none.
-    (body.current?.querySelector<HTMLElement>('input:not([disabled]), select:not([disabled]), textarea:not([disabled])') ?? focusable()[0])?.focus();
+    (body.current?.querySelector<HTMLElement>('input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [role="combobox"]:not([disabled])') ?? focusable()[0])?.focus();
     return () => {
       document.removeEventListener('keydown', onKey);
       opener?.focus?.(); // hand focus back to whatever opened the dialog

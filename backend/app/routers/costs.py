@@ -6,7 +6,10 @@
     costs are summed with exact decimal arithmetic rounded half-up to the cent and labelled "Total" when
     every stage is included or "Subtotal" when only some are. Expenses can be searched, filtered by
     category and sorted by date, amount or category using database indexes (O(log N + K)).
-@traces: SE-FR-01, SE-FR-02, SE-FR-03, SE-NFR-01, SE-NFR-02, UC-01
+    Labor breakdown (UI idea ported from Preethi Seereddy's frontend): each stage may carry an hourly rate and
+    estimated hours, and finished time entries can name their stage. Labor dollars (rate x hours, rounded once
+    half-up to the cent) are a COMPARISON only and are never added into the stage-cost total (ADR 004).
+@traces: SE-FR-01, SE-FR-02, SE-FR-03, SE-FR-04, SE-FR-05, SE-NFR-01, SE-NFR-02, UC-01, UC-03, UC-04
 """
 
 from __future__ import annotations
@@ -19,9 +22,9 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db, utcnow
-from app.core.permissions import MANAGERS, require_project_role
+from app.core.permissions import ALL_ROLES, MANAGERS, require_project_role
 from app.core.security import get_current_user
-from app.models.entities import EXPENSE_CATEGORIES, Expense, Project, ProjectFinancials, StageCost, UserProfile
+from app.models.entities import EXPENSE_CATEGORIES, Expense, Project, ProjectFinancials, StageCost, TimeEntry, UserProfile
 from app.schemas.dto import (
     CostSummaryOut,
     ExpenseCreate,
@@ -31,6 +34,7 @@ from app.schemas.dto import (
     StageCostCreate,
     StageCostOut,
     StageCostUpdate,
+    StageNameOut,
 )
 
 router = APIRouter(prefix="/api/projects/{project_id}", tags=["costs"])
@@ -43,6 +47,47 @@ def money_sum(values) -> Decimal:
     for value in values:
         total += Decimal(str(value))
     return total.quantize(CENT, rounding=ROUND_HALF_UP)
+
+
+def labor_cost(rate: Decimal | None, hours: Decimal | None) -> Decimal | None:
+    """rate x hours, rounded once half-up to the cent; None when either input is missing (shown as N/A)."""
+    if rate is None or hours is None:
+        return None
+    return (Decimal(str(rate)) * Decimal(str(hours))).quantize(CENT, rounding=ROUND_HALF_UP)
+
+
+def finished_hours_by_stage(db: Session, project_id: str) -> tuple[dict[str, Decimal], Decimal]:
+    """Finished hours per stage, plus the finished hours with no stage. Running timers are excluded."""
+    rows = db.execute(
+        select(TimeEntry.stage_cost_id, func.coalesce(func.sum(TimeEntry.duration_hours), 0))
+        .where(TimeEntry.project_id == project_id, TimeEntry.ended_at.is_not(None))
+        .group_by(TimeEntry.stage_cost_id)
+    ).all()
+    per_stage: dict[str, Decimal] = {}
+    unstaged = Decimal("0")
+    for stage_id, total in rows:
+        value = Decimal(str(total)).quantize(CENT, rounding=ROUND_HALF_UP)
+        if stage_id is None:
+            unstaged = value
+        else:
+            per_stage[stage_id] = value
+    return per_stage, unstaged
+
+
+def stage_out(stage: StageCost, actual: Decimal) -> StageCostOut:
+    return StageCostOut(
+        id=stage.id,
+        stage_name=stage.stage_name,
+        amount=stage.amount,
+        position=stage.position,
+        notes=stage.notes,
+        hourly_rate=stage.hourly_rate,
+        estimated_hours=stage.estimated_hours,
+        actual_hours=actual,
+        labor_estimated=labor_cost(stage.hourly_rate, stage.estimated_hours),
+        # Actual labor needs a rate; with no finished hours it is a real 0.00, not N/A.
+        labor_actual=labor_cost(stage.hourly_rate, actual),
+    )
 
 
 def stage_cost_summary(stages: list[StageCost], included_ids: set[str] | None) -> tuple[Decimal, str, list[str]]:
@@ -105,6 +150,10 @@ def get_costs(
     if stage_ids is not None and stage_ids.strip() != "":
         selected = {s.strip() for s in stage_ids.split(",") if s.strip()}
     stage_sum, label, included = stage_cost_summary(list(stages), selected)
+    hours_by_stage, unstaged_hours = finished_hours_by_stage(db, project_id)
+    stage_rows = [stage_out(s, hours_by_stage.get(s.id, Decimal("0.00"))) for s in stages]
+    est_values = [r.labor_estimated for r in stage_rows if r.labor_estimated is not None]
+    act_values = [r.labor_actual for r in stage_rows if r.labor_actual is not None]
 
     stmt = select(Expense).where(Expense.project_id == project_id)
     if category:
@@ -125,7 +174,7 @@ def get_costs(
         currency=fin.currency,
         bid_amount=fin.bid_amount,
         budget_amount=fin.budget_amount,
-        stage_costs=[StageCostOut.model_validate(s) for s in stages],
+        stage_costs=stage_rows,
         stage_cost_sum=stage_sum,
         sum_label=label,
         included_stage_ids=included,
@@ -133,7 +182,21 @@ def get_costs(
         expense_total=money_sum(e.amount for e in expenses),
         expense_count=len(expenses),
         categories=list(categories),
+        unstaged_hours=unstaged_hours,
+        labor_estimated_total=money_sum(est_values) if est_values else None,
+        labor_actual_total=money_sum(act_values) if act_values else None,
     )
+
+
+@router.get("/stages", response_model=list[StageNameOut])
+def list_stage_names(project_id: str, user: UserProfile = Depends(get_current_user), db: Session = Depends(get_db)) -> list[StageNameOut]:
+    """UC-04: any project member may pick a stage when tracking time. Names only - no amounts or rates."""
+    require_project_role(db, user.id, project_id, ALL_ROLES)
+    _ensure_project(db, project_id)
+    stages = db.execute(
+        select(StageCost).where(StageCost.project_id == project_id).order_by(StageCost.position, StageCost.created_at)
+    ).scalars().all()
+    return [StageNameOut(id=s.id, stage_name=s.stage_name) for s in stages]
 
 
 @router.put("/financials", response_model=CostSummaryOut)
@@ -166,10 +229,18 @@ def create_stage_cost(
         position = int(
             db.execute(select(func.coalesce(func.max(StageCost.position), -1)).where(StageCost.project_id == project_id)).scalar_one()
         ) + 1
-    stage = StageCost(project_id=project_id, stage_name=body.stage_name, amount=body.amount, notes=body.notes, position=position)
+    stage = StageCost(
+        project_id=project_id,
+        stage_name=body.stage_name,
+        amount=body.amount,
+        hourly_rate=body.hourly_rate,
+        estimated_hours=body.estimated_hours,
+        notes=body.notes,
+        position=position,
+    )
     db.add(stage)
     db.commit()
-    return StageCostOut.model_validate(stage)
+    return stage_out(stage, finished_hours_by_stage(db, project_id)[0].get(stage.id, Decimal("0.00")))
 
 
 def _stage(db: Session, project_id: str, stage_id: str) -> StageCost:
@@ -197,8 +268,13 @@ def update_stage_cost(
         stage.notes = body.notes
     if body.position is not None:
         stage.position = body.position
+    fields = body.model_fields_set
+    if "hourly_rate" in fields:  # an explicit null clears the rate
+        stage.hourly_rate = body.hourly_rate
+    if "estimated_hours" in fields:
+        stage.estimated_hours = body.estimated_hours
     db.commit()
-    return StageCostOut.model_validate(stage)
+    return stage_out(stage, finished_hours_by_stage(db, project_id)[0].get(stage.id, Decimal("0.00")))
 
 
 @router.delete("/stage-costs/{stage_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -208,6 +284,7 @@ def delete_stage_cost(
     require_project_role(db, user.id, project_id, MANAGERS)
     stage = _stage(db, project_id, stage_id)
     db.query(Expense).filter(Expense.stage_cost_id == stage.id).update({Expense.stage_cost_id: None})
+    db.query(TimeEntry).filter(TimeEntry.stage_cost_id == stage.id).update({TimeEntry.stage_cost_id: None})
     db.delete(stage)
     db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)

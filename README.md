@@ -23,7 +23,7 @@ This README is the single shared brief for every teammate working in this reposi
 4. **Stay in your area.** Each requirement area has an owner (see [Ownership](#requirement-areas-and-ownership)). Work in your own feature folders. Call out any change to shared code in the pull request description: `web/src/app/`, `web/src/shared/`, `web/src/services/`, `backend/app/core/`, `backend/app/main.py`, `backend/app/schemas/dto.py`, `backend/app/models/entities.py`, `supabase/migrations/`, CI configuration, or this README.
 5. **Authorization lives on the server.** Enforce every permission rule in the FastAPI backend through `require_project_role()` in `backend/app/core/permissions.py`, and mirror it in PostgreSQL Row Level Security (RLS) as a second check. The UI may hide controls for usability, but it is never the only check.
 6. **No secrets in Git.** Commit `.env.example` with variable names only. Never commit `.env`, `backend/.dev_jwt_secret`, database passwords or connection strings, Supabase service-role keys, OAuth client secrets, or real user data.
-7. **Branch and review.** Never commit directly to `main`. Branch from the latest `main` using `<name>/<area>-<short-topic>` (for example, `tyler/auth-login`), open a pull request, get at least one teammate's review, then merge. Keep each pull request to one area and one purpose.
+7. **Branch and review.** Never commit directly to `main`. Branch from the latest `main` using `<name>/<area>-<short-topic>` (for example, `tyler/auth-login`), open a pull request, review the diff yourself, then merge. Keep each pull request to one area and one purpose.
 8. **Keep this file accurate.** Update this README in the same pull request that changes behavior, structure, setup, or a decision. Describe planned work as planned; state that something works only after it has been run.
 
 **How sources are cited.** Diagrams are cited by type, title, and author, for example *EX "Log in" (Tyler)*. The SE Document (System Modeling and Architecture Design sections) and the SE Presentation contain the same diagrams under the same titles. Page and slide numbers are not used because they change between revisions. Diagram types: **UC** use-case diagram, **HL** high-level use case, **EX** expanded use case, **SEQ** sequence diagram, **WF** wireframe.
@@ -40,7 +40,8 @@ As of this revision, the repository contains a working full-stack MVP: a React w
 | `web/` | React + TypeScript single-page application (Vite, Tailwind CSS). |
 | `backend/` | FastAPI application server: one router per requirement area, shared security and permission code, tests. |
 | `supabase/migrations/`, `supabase/seed.sql` | PostgreSQL schema, RLS policies, and triggers (the database source of truth), plus demo seed data. |
-| `docs/decisions/` | Architecture decision records (ADR 001–005). |
+| `Dockerfile`, `docker-compose.yml`, `deploy/pi/`, `.dockerignore` | Single-container production image (built web app plus FastAPI), plus the Compose stack and update script for the Raspberry Pi. Proposed in ADR 006; the stack runs on the Pi and is reachable through the Cloudflare Tunnel. |
+| `docs/decisions/` | Architecture decision records (ADR 001–006). |
 | `docs/fullstack-mvp/TEAM_HANDOFF.md` | Per-area file guide, demo script, and known limits for the MVP. |
 | `docs/frontend-comparison.md` | Review of the two candidate frontends and the bugs found in this MVP. |
 | `docs/ProjectForge System Architecture.pdf` | Logical, Physical, and Development views (the same views as the SE Document). These predate the FastAPI decision. |
@@ -58,16 +59,16 @@ As of this revision, the repository contains a working full-stack MVP: a React w
 
 ## Requirement areas and ownership
 
-Each teammate authored one requirement area in the SE Document and owns the matching code. Owners review pull requests that touch their folders.
+Each teammate authored one requirement area in the SE Document and owns the matching code.
 
 | Area | Owner | Requirements | Use cases | Feature folders (`web/src/features/`) | Backend routers (`backend/app/routers/`) |
 | --- | --- | --- | --- | --- | --- |
 | Budgets, costs, and reporting | Jon Sorey | SE-FR-01–05, SE-NFR-01–02 | UC-01–04 | `costs/`, `time-tracking/`, `reports/` | `costs.py`, `time_tracking.py`, `reports.py` |
 | Soft deadlines | Preethi Seereddy | SE-FR-06–10, SE-NFR-03–04 | UC-05–07 | `soft-deadlines/` | `soft_deadlines.py` |
 | Accounts and user preferences | Tyler Gaines | SE-FR-11–15, SE-NFR-05–06 | UC-08–11 | `auth/`, `settings/` | `auth.py`, `settings.py` |
-| Project organization and sharing | Saaqib Shaik | SE-FR-16–20, SE-NFR-09–10 | UC-12–15 | `projects/`, `export/` | `projects.py`, `exports.py` |
+| Project organization and sharing | Saaqib Shaik | SE-FR-16–20, SE-NFR-09–10 | UC-12–15 | `projects/`, `export/`, `calendar/` | `projects.py`, `exports.py` |
 | Dashboard widgets | Myoram Langwang | SE-FR-21–25, SE-NFR-07–08 | UC-16–17 | `dashboard/` | `dashboard.py` |
-| Tasks and team collaboration | Aashwat Singh | SE-FR-26–30, SE-NFR-11–12 | UC-18–22 | `tasks/`, `members/`, `collaboration/` | `tasks.py`, `members.py`, `collaboration.py` |
+| Tasks and team collaboration | Aashwat Singh | SE-FR-26–30, SE-NFR-11–12 | UC-18–22 | `tasks/`, `members/`, `collaboration/` | `tasks.py`, `members.py`, `people.py`, `collaboration.py` |
 
 Shared backend modules in `backend/app/core/` also have primary maintainers: Tyler for `security.py` and `config.py`, and Aashwat for `permissions.py`. `realtime.py` and `sanitizer.py` are shared by Saaqib and Aashwat. See `docs/fullstack-mvp/TEAM_HANDOFF.md` for each area's files and tests.
 
@@ -174,7 +175,7 @@ Implement these rules together with the requirements. "Server" means the FastAPI
 
 | Use case | Rules and outcomes | Source |
 | --- | --- | --- |
-| UC-01 Manage project costs | Check financial access before reading or editing; on denial, show "access denied" and return no restricted data. Show bids, budgets, expenses, and stage costs separately, with the permitted total. Validate edits before saving: invalid input shows the error and keeps the entered values; revoked permission stops without saving; a failed save keeps the input and offers retry or cancel. The total is the sum of permitted stage costs; label a partial sum **subtotal**. Never add bids, budgets, and expenses together. Adding an expense requires category, description, amount, and date, and rechecks access. Search, filter, and sort apply only to permitted rows. | EX, SEQ "Manage project costs" (Jon) |
+| UC-01 Manage project costs | Check financial access before reading or editing; on denial, show "access denied" and return no restricted data. Show bids, budgets, expenses, and stage costs separately, with the permitted total. Validate edits before saving: invalid input shows the error and keeps the entered values; revoked permission stops without saving; a failed save keeps the input and offers retry or cancel. The total is the sum of permitted stage costs; label a partial sum **subtotal**. Never add bids, budgets, and expenses together. Adding an expense requires category, description, amount, and date, and rechecks access. Search, filter, and sort apply only to permitted rows. A "Labor breakdown" card compares, per stage, the hourly rate and estimated hours against the finished hours tagged with that stage (rate x hours, rounded once half-up to the cent); it is a comparison only and is never added into the stage-cost total or any other total, and a missing input shows **N/A**. | EX, SEQ "Manage project costs" (Jon) |
 | UC-02 Review project performance | Check report access first. Resolve permitted projects, people, and fields before retrieving data. Validate the selected period. Managers see authorized team or individual hours; staff see only their own. Report estimated, assigned, and actual hours separately for the period. No matching records → empty report. Missing input or undefined metric → **N/A**. Load failure → retry or cancel. Out-of-scope requests are denied and change no data. | EX, SEQ "Review project performance" (Jon) |
 | UC-04 Track time | Start or stop a timer on a task and persist its start, end, and duration. Duration is end time minus start time, excluding paused intervals. After saving, update the timer and the recent time records. | SEQ "Track time and export records" (Preethi) |
 | UC-05, UC-06 Create or edit a soft deadline | Select a task that has a final due date and enter the soft deadline's date, time, and priority. The soft deadline must be earlier than the final due date. An invalid date shows an error and asks for a new date (create) or keeps the original value (edit). Save within **5 seconds**; otherwise retry and warn the user. Display the saved date and priority. | HL, EX (Preethi); SE-NFR-04 |
@@ -189,7 +190,7 @@ Implement these rules together with the requirements. "Server" means the FastAPI
 | UC-16 Manage dashboard widgets | Add, remove, hide (keeps the widget but marks it hidden), and restore the default layout. A widget that cannot be found shows "widget unavailable"; an invalid action (already added, or not present to remove) shows "invalid action". Widgets display only data the user may access. | EX, SEQ "Manage Dashboard Widgets" (Myoram) |
 | UC-17 Rearrange and save the layout | Drag a widget. If it overlaps another widget, snap it back to its original position. Otherwise save the new position; if the save fails or takes longer than 5 seconds, retry once, show the outcome, and warn if the retry fails. Saving a layout and restoring the default are separate operations. | EX, SEQ "Rearrange Dashboard Widgets" (Myoram) |
 | UC-18 Create and assign task | Validate required fields (title and due date). Only a project manager may create and assign tasks (`Membership.canAssignTasks()`); others get "access denied". The assignee must be a project member. The new task appears in the task list immediately. | SEQ (Aashwat); Logical view note |
-| UC-19 Manage project access | An owner or manager invites members, and the invitee accepts. An owner or manager removes members and may reassign the removed member's open tasks. Every action verifies owner or manager permission. | UC "Manage project access" (Aashwat) |
+| UC-19 Manage project access | An owner or manager invites members, and the invitee accepts. An owner or manager removes members and may reassign the removed member's open tasks. Every action verifies owner or manager permission. The People page also opens a person's overview (`GET /api/people/{id}`): their shared projects and assigned tasks, limited to projects where both people are current members; with no shared project the answer is 404, the same as for an unknown id. | UC "Manage project access" (Aashwat) |
 | UC-20 Change a member's role | The actor must be an owner or manager; otherwise deny access and change nothing. A project must always keep at least one owner; block a change that would remove the last owner. Save the role and notify the member; the new permissions apply on the member's next request. | HL, EX (Aashwat) |
 | UC-21 Post a comment with a mention | Reject an empty comment ("comment can't be empty"). Mentions must be project members; remove an invalid mention, warn the author, and still post the comment. Render Markdown with scripts and raw HTML removed. Show the comment on the task thread and notify valid mentioned members in real time within **2 seconds** (SE-NFR-12). | HL, EX, SEQ (Aashwat) |
 | UC-22 Notifications and deadline reminders | A scheduled job sends deadline reminders. Mentions and project events create notifications delivered in real time. Users view notifications and mark them read. | UC "Comment and get notified" (Aashwat); Physical view |
@@ -262,7 +263,7 @@ The Logical, Physical, and Development views in `docs/ProjectForge System Archit
 | Application server | **FastAPI** in `backend/app/`: one router per area in `routers/`, request and response shapes in `schemas/dto.py`, tables in `models/entities.py`. `core/` provides sign-in (bcrypt passwords, signed JWT sessions, TOTP 2FA, lockout, rate limits), permission checks (`permissions.py`), the live-update hub (`realtime.py`, one WebSocket at `/ws`), Markdown and spreadsheet sanitizing (`sanitizer.py`), HTTPS and security headers, and a development email outbox. Exports (`.ics`, `.xlsx`) are generated here. |
 | Data | **PostgreSQL** with **RLS on every table**, guard triggers, and indexes, all created by `supabase/migrations/`. The backend connects with a server role and enforces permissions itself; RLS and triggers hold the same rules for anyone reaching the database directly. Without `DATABASE_URL`, the backend uses a local **SQLite** file for demos and tests. SQLite has no RLS, so production must use PostgreSQL. |
 | Integrations | Downloadable iCal `.ics` files and `.xlsx` workbooks. FastAPI exchanges a per-export OAuth code and creates selected deadlines on the user’s primary Google calendar or default Outlook calendar. Google Sheets export builds a values payload. SMTP email for unlock links and deadline reminders is planned; the development outbox stands in for it. |
-| Build and delivery | *Planned:* GitHub Actions running backend tests, web tests, and the web build on every pull request, and a hosting choice for the backend and web app. Neither exists yet. |
+| Build and delivery | *Proposed (ADR 006, revised):* one Docker container on a Raspberry Pi 5 serving the API and the built web app, reached through a Cloudflare Tunnel. The database is SQLite on a volume, or Supabase through `DATABASE_URL`. *Planned:* GitHub Actions running backend tests, web tests, and the web build on every pull request. CI does not exist yet. |
 
 **Layer rule:** each layer uses only the layer below it plus `shared/`.
 
@@ -282,7 +283,7 @@ The Logical, Physical, and Development views in `docs/ProjectForge System Archit
 - **Tasks/Charts:** view all, create/edit, soft deadlines, task priority, progress charts
 - **Costs:** overview, details, export to Excel
 - **People:** team members, assign tasks, user permissions
-- **Calendar:** calendar view, due dates, export to calendar
+- **Calendar:** calendar view (Month, Week and Day; Week and Day are an hour-by-hour grid), due dates, export to calendar
 - **Profile/Settings:** account info, edit profile, settings, dark/light mode
 
 The wireframes add Create account, Reset password, Notifications, and Time tracking & export screens. Wireframes show layout only; they do not add scope.
@@ -295,7 +296,7 @@ The wireframes add Create account, Reset password, Notifications, and Time track
 - Compositions (the part is deleted with its whole): User ◆ Dashboard, Dashboard ◆ Widget, Project ◆ TaskList, TaskList ◆ Task, Task ◆ Comment.
 - Operations to implement: `Membership.canAssignTasks()`, `Widget.overlaps(other)`, `Widget.moveTo(x, y)`, `Widget.hide()`, `Dashboard.restoreDefault()`, `Task.assignTo(member)`, `Task.moveTo(list, position)`, `User.unlockAccount(token)`, `ExportJob.generateFile()`, `ExportJob.sendToSheets()`.
 
-**Current schema (`supabase/migrations/0001_initial_schema.sql`, `0002_security_hardening.sql`).** It has 13 tables. `backend/app/models/entities.py` describes the same tables.
+**Current schema (`supabase/migrations/0001_initial_schema.sql`, `0002_security_hardening.sql`, `0003_stage_labor.sql`).** It has 13 tables. `backend/app/models/entities.py` describes the same tables.
 
 | Class | Table | Notes |
 | --- | --- | --- |
@@ -307,8 +308,8 @@ The wireframes add Create account, Reset password, Notifications, and Time track
 | Comment, Notification | `comments`, `notifications` | |
 | Dashboard, Widget | `dashboard_widgets` | One row per widget per user. |
 | — | `soft_deadlines` | Task, date and time, priority, completed. |
-| — | `project_financials`, `stage_costs`, `expenses` | Bid and budget, stage costs, and expenses, kept separate (see `docs/decisions/004-financial-precision-and-stage-costs.md`). |
-| — | `time_entries` | At most one running timer per person (enforced by the database). |
+| — | `project_financials`, `stage_costs`, `expenses` | Bid and budget, stage costs, and expenses, kept separate (see `docs/decisions/004-financial-precision-and-stage-costs.md`). `stage_costs` also holds an optional hourly rate and estimated hours for the labor comparison, which is never added into a total. |
+| — | `time_entries` | At most one running timer per person (enforced by the database). Each entry can name the cost stage (`stage_cost_id`) it was worked on; a trigger rejects a stage from another project. |
 | ExportJob | — | Exports are generated on request and not stored. |
 
 The prototype tables in the hosted Supabase project (`docs/SupabaseScreenshot.png`) are superseded. In particular, no `Login Page`, `Sidebar`, `templates`, `pages`, or `events` tables exist, and none should be added without a requirement.
@@ -334,7 +335,7 @@ CS3354_Team3_Project/
 ├── docs/
 │   ├── ProjectForge System Architecture.pdf
 │   ├── jon-diagrams/              # Editable diagram sources (planned: docs/diagrams/<author>/)
-│   ├── decisions/                 # Architecture decision records (001–005)
+│   ├── decisions/                 # Architecture decision records (001–006)
 │   ├── fullstack-mvp/             # TEAM_HANDOFF.md: per-area files, tests, demo script, known limits
 │   └── frontend-comparison.md     # Frontend review and bug list
 │
@@ -349,6 +350,7 @@ CS3354_Team3_Project/
 │       ├── main.tsx               # Application entry point
 │       ├── index.css              # Tailwind layers, light/dark themes, color-blindness palettes
 │       ├── app/                   # Router and route guards, layout shell, theme provider
+│       ├── components/            # Shared UI components: Select (custom drop-down), Checkbox
 │       ├── pages/                 # One file per screen; assembles feature components
 │       ├── features/              # One folder per module (see below)
 │       ├── services/              # apiClient.ts (REST), realtimeClient.ts (WebSocket), and their tests
@@ -372,7 +374,7 @@ CS3354_Team3_Project/
     └── seed.sql                   # Fake development data only
 ```
 
-The web app and backend were built without some of the folders planned earlier: `web/src/components/`, `web/src/styles/`, `web/e2e/`, `supabase/config.toml`, and `supabase/functions/`. Add `web/src/components/` when shared components are introduced (for example, the shared dropdown and checkbox ported from Preethi's frontend). Edge Functions are not used.
+The web app and backend were built without some of the folders planned earlier: `web/src/styles/`, `web/e2e/`, `supabase/config.toml`, and `supabase/functions/`. Edge Functions are not used. `web/src/components/` now holds the shared `Select` and `Checkbox` (UI ideas ported from Preethi's frontend); use them instead of the native `<select>` and `type="checkbox"`.
 
 ### Pages
 
@@ -406,6 +408,7 @@ web/src/features/
 ├── settings/        # Tyler   — profile, avatar, theme, color-blindness, project-type mode
 ├── projects/        # Saaqib  — project details, status, cards, progress
 ├── export/          # Saaqib  — calendar (.ics, Google, Outlook) and spreadsheet (.xlsx, Sheets) export
+├── calendar/        # Saaqib  — Month, Week and Day views: hour grid, overlap layout, event chips
 ├── dashboard/       # Myoram  — widgets, layout, overlap check, restore default
 ├── tasks/           # Aashwat — tasks, lists, tags, ordering, assignment
 ├── members/         # Aashwat — invitations, membership, roles
@@ -499,9 +502,52 @@ Each provider can be configured independently. Set `FRONTEND_URL` to the exact o
 | Google Calendar | Enable the Calendar API, configure the consent screen and create a Web application OAuth client. If the app is in testing, add the calendar account as a test user. The export requests `calendar.events.owned`. | `http://localhost:5173/calendar/return/google` | `GOOGLE_CALENDAR_CLIENT_ID`, `GOOGLE_CALENDAR_CLIENT_SECRET` |
 | Outlook | Register a Microsoft Entra Web app supporting organizational and personal Microsoft accounts. Add the Microsoft Graph **delegated** permission `Calendars.ReadWrite` and create a client secret. Use the secret’s value. | `http://localhost:5173/calendar/return/outlook` | `OUTLOOK_CALENDAR_CLIENT_ID`, `OUTLOOK_CALENDAR_CLIENT_SECRET` |
 
+For the Pi deployment, set these credentials in the existing backend environment file and register callbacks under the public HTTPS origin in `FRONTEND_URL`. Recreate the container with `docker compose up -d --force-recreate` after changing its environment. The calendar code reaches the live site after this PR is merged and the Pi update script runs.
+
 Restart the backend after setting the credentials. On **Calendar**, choose a project, select **Export to Google Calendar** or **Export to Outlook**, choose deadline categories and continue to the provider. A successful return shows the export count. A failed export can be retried with the same provider account. The Settings preference skips the local confirmation. The provider still handles authorization on every export.
 
 Provider references are the [Google web server authorization guide](https://developers.google.com/identity/protocols/oauth2/web-server), [Google event insert](https://developers.google.com/workspace/calendar/api/v3/reference/events/insert), [Microsoft authorization code flow](https://learn.microsoft.com/en-us/entra/identity-platform/v2-oauth2-auth-code-flow), and [Graph event creation](https://learn.microsoft.com/en-us/graph/api/user-post-events?view=graph-rest-1.0).
+
+### Deploy (proposed, ADR 006)
+
+One container serves the web app, `/api`, and `/ws` from a single origin. The host is a Raspberry Pi 5 reached through a Cloudflare Tunnel.
+
+The Pi needs Docker Engine with the Compose plugin, Git, and `cloudflared` running as a service with a tunnel on a domain that Cloudflare manages. Keep SSH on Tailscale; the stack opens no router port.
+
+1. Clone the repository on the Pi and enter it.
+2. Create `backend/.env` (Git ignores it) from `backend/.env.example`. Set `JWT_SECRET` to at least 32 random characters (`openssl rand -hex 32`) and `FRONTEND_URL` to the public origin, for example `https://<hostname>`. Leave `DATABASE_URL` blank for SQLite on the `projectforge-data` volume, or set the Supabase session-pooler connection string after applying `supabase/migrations/` in order. `docker-compose.yml` fixes `ENVIRONMENT`, `FORCE_HTTPS`, `SQLITE_PATH`, and `FORWARDED_ALLOW_IPS`, so values for those in `.env` have no effect.
+3. Start it. The first build runs on the Pi's CPU and takes a while:
+
+```bash
+docker compose up -d --build
+```
+
+4. Check the container on the Pi. The header stands in for the TLS that Cloudflare terminates; without it the app redirects to HTTPS:
+
+```bash
+curl -s -H 'X-Forwarded-Proto: https' http://127.0.0.1:8000/api/health
+```
+
+5. In the Cloudflare dashboard, open the tunnel's **Routes** (Published application) and add a route: your hostname, type `HTTP`, URL `localhost:8000`. Saving creates the proxied `CNAME`. Do not put Cloudflare Access in front of it, or graders meet a login screen. If the hostname already has an `A` record, delete it first.
+6. Check `https://<hostname>/api/health`. It reports `"database": "sqlite"` or `"postgresql"`.
+
+To update after a merge, run this on the Pi. It does nothing when there is no new commit. A timer or CI job to run it automatically is not set up yet:
+
+```bash
+deploy/pi/update.sh
+```
+
+**What the live site shows.** The live site is one shared deployment of `main`; everyone who opens the URL sees the same site and the same data. A change reaches it only after it is merged to `main` and `deploy/pi/update.sh` is run on the Pi. Nothing runs that script automatically, so a merge alone does not change the live site. To see your own changes before they are merged, run the backend and the web app on your own machine (see [Setup](#setup): `uvicorn` and `npm run dev`). That copy uses its own local SQLite database and never touches the live site.
+
+A merged change that raises `SQLITE_SCHEMA_VERSION` in `backend/app/core/database.py` makes the Pi rebuild its demo database from the seed on the next update. The old file is kept in the data volume as `projectforge.db.bak-v<old version>`, but anything created on the live site is gone from the live data.
+
+To run the production image locally (Docker or Colima):
+
+```bash
+docker build -t projectforge:local . && docker run --rm -p 8080:8000 -e ENVIRONMENT=production -e JWT_SECRET=$(openssl rand -hex 32) -e DEMO_MODE=true -e FORCE_HTTPS=false projectforge:local
+```
+
+`DEMO_MODE=true` shows the demo accounts publicly. Verified 2026-11-24: the image builds and, run locally on SQLite, serves the landing page, login, dashboard, and live WebSocket on one port. Also verified 2026-11-24 on a MacBook (Colima, arm64): the Compose stack reports healthy, rate-limits on the address Cloudflare would append to `X-Forwarded-For` even when a client forges the header, and keeps its SQLite data across `docker compose down` and `up`. The same checks passed on the Pi itself (Debian 12, arm64), where the app is also unreachable from other devices on the home network. Through the public Cloudflare route (2026-11-25): `/api/health` answers over HTTPS with HSTS and the security headers, plain HTTP redirects to HTTPS, login as the demo owner reaches the dashboard with the "Live" WebSocket badge, the Projects, Tasks, Charts, Cost, Calendar, People, Time tracking, and Settings pages load their data, the Member role gets "HTTP 403 · Access denied" on Cost, removing a dashboard widget and restoring the default layout both save (200), a client-supplied `CF-Connecting-IP` is refused with 403, and logins with a forged `X-Forwarded-For` are rate-limited on the real address (429). `deploy/pi/update.sh` switched the Pi to `main`, rebuilt, and reported healthy, and a second run did nothing. Cloudflare's Web Analytics script, if enabled for the zone, is blocked by the app's Content Security Policy and logs a console error; turn it off in the Cloudflare dashboard. The Supabase connection, the Manager role and its 2FA step, and creating or editing other records (tasks, comments, expenses) through the public route have not been tested.
 
 **Database:** for PostgreSQL or Supabase, apply `supabase/migrations/` in order, then optionally `supabase/seed.sql`, and set `DATABASE_URL`.
 
@@ -521,9 +567,9 @@ cd web && npm run build
 
 **Last verified (2026-11-24, macOS, Python 3.13.1, Node 25.9.0):**
 
-- **Backend:** 40 passed, 9 PostgreSQL-only tests skipped. The local run used `PYTHON_DOTENV_DISABLED=1 .venv/bin/python -m pytest --ignore-glob='*.env*'` inside `backend/`. The calendar tests simulate OAuth and event API responses. Live account verification is pending.
+- **Backend:** 42 passed, 9 PostgreSQL-only tests skipped. The local run used `PYTHON_DOTENV_DISABLED=1 .venv/bin/python -m pytest --ignore-glob='*.env*'` inside `backend/`. The calendar tests simulate OAuth and event API responses. Live account verification is pending.
 - **Web build:** TypeScript checks and Vite bundling passed with `npm run build --prefix web -- --emptyOutDir=false` because the local build directory could not be emptied.
-- **Web tests:** 46 passed with `NODE_OPTIONS=--no-experimental-webstorage npm test --prefix web` on Node 25. This disables the incomplete Node 25 global `localStorage` in the test runner.
+- **Web tests:** 67 passed with `NODE_OPTIONS=--no-experimental-webstorage npm test --prefix web` on Node 25. This disables the incomplete Node 25 global `localStorage` in the test runner.
 
 ## Implementation and verification guidance
 

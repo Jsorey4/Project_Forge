@@ -3,12 +3,15 @@
  * @description Start / pause / resume / stop timer for one task with a live HH:MM:SS clock. The "hero" look
  *   matches the Timer card in time-tracking.html (big centered clock, task and project, Stop + Pause
  *   buttons); the compact look sits inside the task screen. Only one timer can run at a time per person;
- *   the server rejects a second start and the widget explains why.
- * @traces SE-FR-04, UC-04
+ *   the server rejects a second start and the widget explains why. When the project has cost stages, a stage
+ *   picker on its own row above the clock tags the new timer with the stage it is worked on (labor breakdown;
+ *   UI idea ported from Preethi Seereddy's frontend).
+ * @traces SE-FR-04, SE-FR-01, UC-04
  */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useId, useState } from 'react';
+import { Select } from '../../components/Select';
 import { useRealtime } from '../../services/realtimeClient';
-import type { TimeEntry } from '../../shared/types';
+import type { StageName, TimeEntry } from '../../shared/types';
 import { formatDuration } from '../../shared/format';
 import { Alert, Icon } from '../../shared/ui';
 import { toApiError } from '../../shared/useSave';
@@ -17,6 +20,8 @@ import { timeController } from './timeController';
 
 interface Props {
   taskId: string;
+  /** Project of the task; when given, the project's cost stages can be picked before starting. */
+  projectId?: string;
   taskTitle?: string;
   projectName?: string;
   canTrack: boolean;
@@ -25,12 +30,27 @@ interface Props {
   onActiveChange?: (entry: TimeEntry | null) => void;
 }
 
-export function TaskTimerWidget({ taskId, taskTitle, projectName, canTrack, variant = 'compact', onStopped, onActiveChange }: Props) {
+export function TaskTimerWidget({ taskId, projectId, taskTitle, projectName, canTrack, variant = 'compact', onStopped, onActiveChange }: Props) {
   const [active, setActive] = useState<TimeEntry | null>(null);
   const [fetchedAt, setFetchedAt] = useState(Date.now());
   const [now, setNow] = useState(Date.now());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [stages, setStages] = useState<StageName[]>([]);
+  const [stageId, setStageId] = useState('');
+  const stageFieldId = useId();
+
+  // Stage names are readable by every member (no amounts), so the picker works for assignees too.
+  useEffect(() => {
+    setStageId('');
+    setStages([]);
+    if (!projectId) return;
+    let live = true;
+    timeController.stages(projectId).then((rows) => live && setStages(rows)).catch(() => live && setStages([]));
+    return () => {
+      live = false;
+    };
+  }, [projectId]);
 
   const refresh = useCallback(async () => {
     try {
@@ -72,7 +92,7 @@ export function TaskTimerWidget({ taskId, taskTitle, projectName, canTrack, vari
   }
 
   const buttons = !onThisTask ? (
-    <button type="button" className={`btn-primary ${variant === 'hero' ? 'w-[120px]' : ''}`} disabled={busy || !!active} onClick={() => void act(() => timeController.start(taskId))}>
+    <button type="button" className={`btn-primary ${variant === 'hero' ? 'w-[120px]' : ''}`} disabled={busy || !!active} onClick={() => void act(() => timeController.start(taskId, '', stageId || null))}>
       <Icon name="play" /> Start
     </button>
   ) : (
@@ -91,11 +111,25 @@ export function TaskTimerWidget({ taskId, taskTitle, projectName, canTrack, vari
       )}
     </>
   );
+  const stagePicker =
+    stages.length > 0 ? (
+      <div className={variant === 'hero' ? 'mb-6 text-left' : ''}>
+        <label className="label" htmlFor={stageFieldId}>Cost stage <span className="font-normal text-muted">(optional)</span></label>
+        <Select
+          id={stageFieldId}
+          value={onThisTask && active ? active.stage_cost_id ?? '' : stageId}
+          onChange={setStageId}
+          disabled={!!active}
+          options={[{ value: '', label: 'No stage' }, ...stages.map((s) => ({ value: s.id, label: s.stage_name }))]}
+        />
+      </div>
+    ) : null;
   const status = onThisTask ? (active?.is_paused ? 'Paused' : 'Running') : active ? `Timer running on “${active.task_title}”` : 'Ready';
 
   if (variant === 'hero') {
     return (
       <div className="text-center">
+        {stagePicker}
         {error ? <div className="mb-3 text-left"><Alert onClose={() => setError(null)}>{error}</Alert></div> : null}
         <p className="font-extrabold tabular-nums tracking-[0.02em] text-ink text-[52px] leading-[60px]" aria-live="polite" aria-label="Elapsed time">{formatDuration(elapsed)}</p>
         <p className="mt-3 text-[15px] font-semibold leading-[22px] text-ink">{taskTitle}</p>
@@ -107,6 +141,7 @@ export function TaskTimerWidget({ taskId, taskTitle, projectName, canTrack, vari
 
   return (
     <div className="space-y-3">
+      {stagePicker}
       {error ? <Alert onClose={() => setError(null)}>{error}</Alert> : null}
       <div className="flex items-center justify-between gap-4 rounded-btn border border-line bg-surface-2 px-4 py-3">
         <div>
