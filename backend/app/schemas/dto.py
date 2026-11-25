@@ -421,6 +421,45 @@ class MemberOut(BaseModel):
     done_task_count: int = 0
 
 
+class PersonUserOut(BaseModel):
+    id: str
+    username: str
+    display_name: str
+    email: str
+    avatar_url: str | None
+
+
+class PersonProjectOut(BaseModel):
+    """A project shared by the caller and the person: the person's role and their task progress in it."""
+
+    id: str
+    name: str
+    project_type: ProjectType
+    status: ProjectStatus
+    deadline: UTCDateTimeOut
+    role: Role
+    task_count: int = 0
+    open_task_count: int = 0
+    done_task_count: int = 0
+
+
+class PersonTaskOut(BaseModel):
+    id: str
+    project_id: str
+    project_name: str
+    title: str
+    status: TaskStatus
+    priority: TaskPriority
+    due_date: UTCDateTimeOut
+    completed_at: UTCDateTimeOut | None
+
+
+class PersonOverviewOut(BaseModel):
+    user: PersonUserOut
+    projects: list[PersonProjectOut]
+    tasks: list[PersonTaskOut]
+
+
 class ProjectOut(BaseModel):
     id: str
     name: str

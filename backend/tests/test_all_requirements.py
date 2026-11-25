@@ -800,6 +800,55 @@ def test_uc19_member_removal_reassigns_open_tasks_se_fr30(client):
     assert last.status_code == 400 and last.json()["detail"] == "Project must have at least one owner"
 
 
+def test_uc19_person_overview_shows_only_shared_projects_se_fr30_se_nfr11(client):
+    """People drill-down: the caller sees a person's projects and tasks only where BOTH are current members."""
+    for name in ("pdrilla", "pdrillb", "pdrillout"):
+        make_user(name)
+    shared = new_project(client, members=["pdrilla", "pdrillb"], name="Drill shared")
+    solo = new_project(client, members=["pdrilla"], name="Drill jon and a")
+    hidden = new_project(client, owner="tyler", members=["pdrilla"], name="Drill hidden from jon")
+    a = user_id("pdrilla")
+    new_task(client, shared["id"], title="Open task", assignee_id=a, priority="high")
+    done = new_task(client, shared["id"], title="Finished task", assignee_id=a, status="done")
+    new_task(client, solo["id"], title="Solo task", assignee_id=a)
+    new_task(client, hidden["id"], actor="tyler", title="Secret task", assignee_id=a)
+    other = new_task(client, shared["id"], title="Not a's task", assignee_id=user_id("pdrillb"))
+
+    r = client.get(f"/api/people/{a}", headers=H(client, "jon"))
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["user"]["username"] == "pdrilla" and body["user"]["email"] == "pdrilla@example.com"
+    assert "password_hash" not in str(body) and "mfa" not in str(body).lower()
+    assert {p["name"] for p in body["projects"]} == {"Drill shared", "Drill jon and a"}  # tyler's project is not jon's
+    by_name = {p["name"]: p for p in body["projects"]}
+    assert by_name["Drill shared"]["task_count"] == 2 and by_name["Drill shared"]["done_task_count"] == 1
+    assert by_name["Drill shared"]["open_task_count"] == 1 and by_name["Drill shared"]["role"] == "member"
+    assert by_name["Drill jon and a"]["task_count"] == 1
+    assert {t["title"] for t in body["tasks"]} == {"Open task", "Finished task", "Solo task"}
+    assert all(t["project_id"] != hidden["id"] for t in body["tasks"]) and other["title"] not in str(body)
+    assert {t["id"] for t in body["tasks"] if t["status"] == "done"} == {done["id"]}
+
+    # Another member of only the shared project sees only that project; a third person with none sees 404.
+    from_b = client.get(f"/api/people/{a}", headers=H(client, "pdrillb")).json()
+    assert [p["name"] for p in from_b["projects"]] == ["Drill shared"]
+    assert {t["title"] for t in from_b["tasks"]} == {"Open task", "Finished task"}
+    no_overlap = client.get(f"/api/people/{a}", headers=H(client, "pdrillout"))
+    missing = client.get("/api/people/00000000-0000-4000-8000-0000000000ff", headers=H(client, "jon"))
+    assert no_overlap.status_code == 404 and missing.status_code == 404 and no_overlap.json() == missing.json()  # no account probing
+    assert client.get("/api/people/not-a-uuid", headers=H(client, "jon")).status_code == 404
+    assert client.get(f"/api/people/{user_id('pdrillout')}", headers=H(client, "jon")).status_code == 404  # shares nothing
+    assert client.get(f"/api/people/{a}").status_code in (401, 403)  # signed in only
+
+    # Membership is checked on every request: once the caller is removed, that project disappears for them.
+    assert client.delete(f"/api/projects/{shared['id']}/members/{user_id('pdrillb')}", headers=H(client, "jon")).status_code == 200
+    assert client.get(f"/api/people/{a}", headers=H(client, "pdrillb")).status_code == 404
+    # ...and when the PERSON is removed from a project, it drops out of the caller's view too.
+    assert client.delete(f"/api/projects/{solo['id']}/members/{a}", headers=H(client, "jon")).status_code == 200
+    after = client.get(f"/api/people/{a}", headers=H(client, "jon")).json()
+    assert [p["name"] for p in after["projects"]] == ["Drill shared"]
+    assert {t["title"] for t in after["tasks"]} == {"Open task", "Finished task"}
+
+
 def test_uc22_notifications_and_deadline_reminders_se_fr29(client):
     project = new_project(client, members=["staff"], name="Reminders")
     pid = project["id"]

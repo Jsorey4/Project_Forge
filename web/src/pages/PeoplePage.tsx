@@ -4,8 +4,10 @@
  *   Member role badge, the project and their task count, and an "x of y done" progress bar. Owners and
  *   managers can add members (invite modal), change roles (never leaving the project without an owner) and
  *   remove members while reassigning their open tasks; anyone can leave a project. Changes apply on the
- *   next request because the server re-checks membership every time.
- * @traces SE-FR-30, SE-NFR-09, SE-NFR-11, UC-19, UC-20
+ *   next request because the server re-checks membership every time. Clicking a card (or pressing Enter or
+ *   Space on its name) opens a dialog with the person's shared projects and assigned tasks (UI idea ported from
+ *   Preethi Seereddy's frontend); the role picker, Remove and Leave stay separate controls on top of the card.
+ * @traces SE-FR-16, SE-FR-26, SE-FR-30, SE-NFR-09, SE-NFR-11, UC-19, UC-20
  */
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -13,6 +15,7 @@ import { useAuth } from '../features/auth/AuthProvider';
 import { InviteMemberModal } from '../features/members/InviteMemberModal';
 import { ReassignTasksModal } from '../features/members/ReassignTasksModal';
 import { RoleSelect } from '../features/members/RoleSelect';
+import { PersonModal } from '../features/members/PersonModal';
 import { memberController } from '../features/members/memberController';
 import { ProjectPicker, useProjectScope } from '../features/projects/ProjectScope';
 import { useRealtime } from '../services/realtimeClient';
@@ -30,6 +33,7 @@ export function PeoplePage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [inviting, setInviting] = useState(false);
   const [removing, setRemoving] = useState<Member | null>(null);
+  const [viewing, setViewing] = useState<Member | null>(null);
   const [search, setSearch] = useState('');
 
   const load = useCallback(async () => {
@@ -108,15 +112,22 @@ export function PeoplePage() {
             const canRemove = !isSelf && manager && (m.role !== 'owner' || callerRole === 'owner');
             const pct = m.task_count ? (m.done_task_count / m.task_count) * 100 : 0;
             return (
-              <article key={m.user_id} className="card flex flex-col p-6" aria-label={m.display_name}>
-                <div className="flex items-center gap-3.5">
+              // The name is a real button whose ::after covers the whole card, so a click anywhere on the card opens
+              // the person dialog; the controls below sit above that cover (relative z-10) and keep their own clicks.
+              <article key={m.user_id} className="card relative flex flex-col p-6 transition hover:border-accent/60" aria-label={m.display_name}>
+                <button
+                  type="button"
+                  aria-haspopup="dialog"
+                  onClick={() => setViewing(m)}
+                  className="flex items-center gap-3.5 text-left after:absolute after:inset-0 after:cursor-pointer after:rounded-card focus-visible:outline-none focus-visible:after:ring-2 focus-visible:after:ring-brand"
+                >
                   <Avatar name={m.display_name} url={m.avatar_url} size="h-14 w-14" text="text-lg" />
-                  <div className="min-w-0">
-                    <p className="truncate text-[17px] font-bold leading-6 text-ink">{m.display_name}{isSelf ? <span className="ml-1 text-xs font-medium text-muted">(you)</span> : null}</p>
-                    <p className="truncate text-[13px] text-muted">@{m.username}</p>
-                  </div>
-                </div>
-                <div className="mt-4 flex items-center justify-between gap-2">
+                  <span className="min-w-0">
+                    <span className="block truncate text-[17px] font-bold leading-6 text-ink">{m.display_name}{isSelf ? <span className="ml-1 text-xs font-medium text-muted">(you)</span> : null}</span>
+                    <span className="block truncate text-[13px] text-muted">@{m.username}</span>
+                  </span>
+                </button>
+                <div className="relative z-10 mt-4 flex items-center justify-between gap-2 self-start">
                   {manager ? <RoleSelect value={m.role} callerRole={callerRole} onChange={(r) => void changeRole(m, r)} label={`Role for ${m.display_name}`} /> : <RoleBadge role={m.role} />}
                 </div>
                 <div className="mt-5">
@@ -130,7 +141,7 @@ export function PeoplePage() {
                   </div>
                   <ProgressBar value={pct} color="rgb(var(--c-accent))" />
                 </div>
-                <div className="mt-auto flex justify-end gap-1 pt-4">
+                <div className="relative z-10 mt-auto flex justify-end gap-1 pt-4">
                   {canRemove ? <button type="button" className="btn-ghost btn-sm hover:text-danger" onClick={() => setRemoving(m)}><Icon name="trash" className="h-3.5 w-3.5" /> Remove</button> : null}
                   {isSelf ? <button type="button" className="btn-ghost btn-sm" onClick={() => void leave()}><Icon name="logout" className="h-3.5 w-3.5" /> Leave</button> : null}
                 </div>
@@ -140,6 +151,7 @@ export function PeoplePage() {
         </div>
       )}
       <InviteMemberModal open={inviting} projectId={currentProject.id} callerRole={callerRole} onClose={() => setInviting(false)} onInvited={(m) => { setInviting(false); setNotice(`${m.display_name} was added as ${m.role}.`); void load(); }} />
+      <PersonModal person={viewing} onClose={() => setViewing(null)} />
       <ReassignTasksModal open={!!removing} projectId={currentProject.id} member={removing} members={members ?? []} onClose={() => setRemoving(null)} onRemoved={(msg) => { setRemoving(null); setNotice(msg); void load(); }} />
     </div>
   );
