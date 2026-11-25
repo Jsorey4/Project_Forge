@@ -60,4 +60,10 @@ reports healthy, listens only on `127.0.0.1:8000` (a request from another machin
 port 8000 gets no answer), gives the same 429 result for the forged-header test, keeps its SQLite data across
 `docker compose down` and `up`, and starts on boot (`restart: unless-stopped`, Docker enabled).
 
-**Not yet run:** the Cloudflare route to this app, `deploy/pi/update.sh`, and the Supabase connection.
+Through the public Cloudflare route (2026-11-25): HTTPS health check with HSTS, login and the main pages, the live
+WebSocket badge, and the forged-header rate-limit test all pass (a client-supplied `CF-Connecting-IP` is refused with
+403). The nine main pages load, the Member role is denied the Cost page with HTTP 403, and removing a dashboard widget
+and restoring the default layout both save (200). `deploy/pi/update.sh` switched the Pi to `main` and rebuilt it.
+
+**Not yet run:** the Supabase connection, the Manager role with its 2FA step, and creating or editing other records
+(tasks, comments, expenses) through the public route.
