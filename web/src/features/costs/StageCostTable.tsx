@@ -8,6 +8,7 @@
 import { useState } from 'react';
 import type { CostSummary, StageCost } from '../../shared/types';
 import { formatMoney } from '../../shared/format';
+import { Checkbox } from '../../components/Checkbox';
 import { Alert, Icon, RetryBanner } from '../../shared/ui';
 import { toApiError, useSave } from '../../shared/useSave';
 import { costController } from './costController';
@@ -70,7 +71,7 @@ export function StageCostTable({ projectId, summary, selected, onToggle, onToggl
         <table className="w-full">
           <thead>
             <tr>
-              <th className="table-head w-10"><input type="checkbox" checked={allChecked} onChange={(e) => onToggleAll(e.target.checked)} aria-label="Include all stages" /></th>
+              <th className="table-head w-10"><Checkbox checked={allChecked} onChange={onToggleAll} ariaLabel="Include all stages" /></th>
               <th className="table-head">Stage</th>
               <th className="table-head text-right">Cost</th>
               <th className="table-head w-24" />
@@ -79,7 +80,7 @@ export function StageCostTable({ projectId, summary, selected, onToggle, onToggl
           <tbody className="[&>tr]:border-b [&>tr]:border-line">
             {summary.stage_costs.map((s) => (
               <tr key={s.id} className={selected.has(s.id) ? '' : 'opacity-50'}>
-                <td className="table-cell"><input type="checkbox" checked={selected.has(s.id)} onChange={() => onToggle(s.id)} aria-label={`Include ${s.stage_name}`} /></td>
+                <td className="table-cell"><Checkbox checked={selected.has(s.id)} onChange={() => onToggle(s.id)} ariaLabel={`Include ${s.stage_name}`} /></td>
                 {editing?.id === s.id ? (
                   <>
                     <td className="table-cell"><input className="input py-1" value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} aria-label="Stage name" /></td>

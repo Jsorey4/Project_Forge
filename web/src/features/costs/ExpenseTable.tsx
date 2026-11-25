@@ -6,6 +6,7 @@
  * @traces SE-FR-02, SE-FR-03, SE-NFR-01, SE-NFR-04, UC-01
  */
 import { useState } from 'react';
+import { Select } from '../../components/Select';
 import type { CostQuery, CostSummary, Expense, ExpenseCategory } from '../../shared/types';
 import { formatDate, formatMoney, titleCase, todayIso } from '../../shared/format';
 import { Alert, Badge, Icon, RetryBanner } from '../../shared/ui';
@@ -94,10 +95,7 @@ export function ExpenseTable({ projectId, summary, query, onQuery, onChanged }: 
           <Icon name="search" className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
           <input className="input pl-10" placeholder="Search expenses" value={query.search ?? ''} onChange={(e) => onQuery({ ...query, search: e.target.value })} aria-label="Search expenses" />
         </div>
-        <select className="input w-auto" value={query.category ?? ''} onChange={(e) => onQuery({ ...query, category: e.target.value || undefined })} aria-label="Filter by category">
-          <option value="">All categories</option>
-          {EXPENSE_CATEGORIES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
-        </select>
+        <Select className="w-auto" value={query.category ?? ''} onChange={(v) => onQuery({ ...query, category: v || undefined })} ariaLabel="Filter by category" options={[{ value: '', label: 'All categories' }, ...EXPENSE_CATEGORIES]} />
       </div>
       {rowError ? <Alert onClose={() => setRowError(null)}>{rowError}</Alert> : null}
       <div className="overflow-x-auto">
@@ -121,16 +119,11 @@ export function ExpenseTable({ projectId, summary, query, onQuery, onChanged }: 
                 <tr key={e.id} className="bg-brand/5">
                   <td className="table-cell"><input type="date" className="input py-1" value={editing.expense_date} onChange={(ev) => setEditing({ ...editing, expense_date: ev.target.value })} aria-label="Expense date" /></td>
                   <td className="table-cell">
-                    <select className="input py-1" value={editing.category} onChange={(ev) => setEditing({ ...editing, category: ev.target.value as ExpenseCategory })} aria-label="Expense category">
-                      {EXPENSE_CATEGORIES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
-                    </select>
+                    <Select className="py-1" value={editing.category} onChange={(v) => setEditing({ ...editing, category: v as ExpenseCategory })} ariaLabel="Expense category" options={EXPENSE_CATEGORIES} />
                   </td>
                   <td className="table-cell"><input className="input py-1" value={editing.description} onChange={(ev) => setEditing({ ...editing, description: ev.target.value })} aria-label="Expense description" /></td>
                   <td className="table-cell">
-                    <select className="input py-1" value={editing.stage_cost_id ?? ''} onChange={(ev) => setEditing({ ...editing, stage_cost_id: ev.target.value || null })} aria-label="Expense stage">
-                      <option value="">—</option>
-                      {summary.stage_costs.map((s) => <option key={s.id} value={s.id}>{s.stage_name}</option>)}
-                    </select>
+                    <Select className="py-1" value={editing.stage_cost_id ?? ''} onChange={(v) => setEditing({ ...editing, stage_cost_id: v || null })} ariaLabel="Expense stage" options={[{ value: '', label: '—' }, ...summary.stage_costs.map((s) => ({ value: s.id, label: s.stage_name }))]} />
                   </td>
                   <td className="table-cell"><input className="input py-1 text-right" inputMode="decimal" value={editing.amount} onChange={(ev) => setEditing({ ...editing, amount: ev.target.value })} aria-label="Expense amount" /></td>
                   <td className="table-cell text-right">
@@ -168,14 +161,9 @@ export function ExpenseTable({ projectId, summary, query, onQuery, onChanged }: 
         {add.error && !Object.keys(add.fieldErrors).length ? <Alert onClose={add.reset}>{add.error.detail}</Alert> : null}
         <div className="mt-2 grid gap-2 md:grid-cols-[9rem_9rem_1fr_9rem_8rem_auto]">
           <input type="date" className="input" value={form.expense_date} onChange={(e) => setForm({ ...form, expense_date: e.target.value })} aria-label="Date" />
-          <select className="input" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value as ExpenseCategory })} aria-label="Category">
-            {EXPENSE_CATEGORIES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
-          </select>
+          <Select value={form.category} onChange={(v) => setForm({ ...form, category: v as ExpenseCategory })} ariaLabel="Category" options={EXPENSE_CATEGORIES} />
           <input className="input" placeholder="Description" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} aria-label="Description" maxLength={300} />
-          <select className="input" value={form.stage_cost_id ?? ''} onChange={(e) => setForm({ ...form, stage_cost_id: e.target.value || null })} aria-label="Stage">
-            <option value="">No stage</option>
-            {summary.stage_costs.map((s) => <option key={s.id} value={s.id}>{s.stage_name}</option>)}
-          </select>
+          <Select value={form.stage_cost_id ?? ''} onChange={(v) => setForm({ ...form, stage_cost_id: v || null })} ariaLabel="Stage" options={[{ value: '', label: 'No stage' }, ...summary.stage_costs.map((s) => ({ value: s.id, label: s.stage_name }))]} />
           <input className="input text-right" placeholder="0.00" inputMode="decimal" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} aria-label="Amount" />
           <button type="button" className="btn-primary" onClick={submit} disabled={add.saving}><Icon name="plus" /> Add</button>
         </div>

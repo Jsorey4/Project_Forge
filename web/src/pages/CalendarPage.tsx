@@ -16,6 +16,7 @@ import { useProjectScope } from '../features/projects/ProjectScope';
 import { useRealtime } from '../services/realtimeClient';
 import type { CalendarEvent } from '../shared/types';
 import { formatTime } from '../shared/format';
+import { Select } from '../components/Select';
 import { Alert, Icon, PageHeader, Segmented, Spinner } from '../shared/ui';
 import { toApiError } from '../shared/useSave';
 
@@ -111,10 +112,7 @@ export function CalendarPage() {
         title="Calendar"
         subtitle={subtitle}
         actions={
-          <select className="input w-auto" value={projectFilter} onChange={(e) => setProjectFilter(e.target.value)} aria-label="Filter by project">
-            <option value="">All projects</option>
-            {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-          </select>
+          <Select className="w-auto" value={projectFilter} onChange={setProjectFilter} ariaLabel="Filter by project" options={[{ value: '', label: 'All projects' }, ...projects.map((p) => ({ value: p.id, label: p.name }))]} />
         }
       />
       <div className="-mt-3 flex flex-wrap items-center justify-between gap-3">

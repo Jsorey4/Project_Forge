@@ -6,6 +6,7 @@
  * @traces SE-FR-26, SE-FR-27, SE-FR-04, UC-18, UC-03
  */
 import { useState } from 'react';
+import { Select } from '../../components/Select';
 import type { Member, Role, TaskDetail, TaskInput, TaskList, TaskPriority, TaskStatus } from '../../shared/types';
 import { titleCase, toLocalInput } from '../../shared/format';
 import { Alert, Field, Modal, RetryBanner } from '../../shared/ui';
@@ -99,28 +100,18 @@ export function TaskForm({ open, onClose, projectId, role, members, lists, task,
         </Field>
         <div className="grid gap-4 sm:grid-cols-3">
           <Field label="Status" htmlFor="t-status">
-            <select id="t-status" className="input" value={status} onChange={(e) => setStatus(e.target.value as TaskStatus)}>
-              {BOARD_COLUMNS.map((c) => <option key={c.status} value={c.status}>{c.label}</option>)}
-            </select>
+            <Select id="t-status" value={status} onChange={(v) => setStatus(v as TaskStatus)} options={BOARD_COLUMNS.map((c) => ({ value: c.status, label: c.label }))} />
           </Field>
           <Field label="Priority" htmlFor="t-priority">
-            <select id="t-priority" className="input" value={priority} onChange={(e) => setPriority(e.target.value as TaskPriority)}>
-              {PRIORITIES.map((p) => <option key={p} value={p}>{titleCase(p)}</option>)}
-            </select>
+            <Select id="t-priority" value={priority} onChange={(v) => setPriority(v as TaskPriority)} options={PRIORITIES.map((p) => ({ value: p, label: titleCase(p) }))} />
           </Field>
           <Field label="Feature list" htmlFor="t-list">
-            <select id="t-list" className="input" value={listId} onChange={(e) => setListId(e.target.value)}>
-              <option value="">No list</option>
-              {lists.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
-            </select>
+            <Select id="t-list" value={listId} onChange={setListId} options={[{ value: '', label: 'No list' }, ...lists.map((l) => ({ value: l.id, label: l.name }))]} />
           </Field>
         </div>
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Assignee" htmlFor="t-assignee" error={save.fieldErrors.assignee_id} hint={canAssign ? undefined : 'Only owners and managers can assign tasks.'}>
-            <select id="t-assignee" className="input" value={assigneeId} disabled={!canAssign} onChange={(e) => setAssigneeId(e.target.value)}>
-              <option value="">Unassigned</option>
-              {members.map((m) => <option key={m.user_id} value={m.user_id}>{m.display_name} (@{m.username})</option>)}
-            </select>
+            <Select id="t-assignee" value={assigneeId} disabled={!canAssign} onChange={setAssigneeId} options={[{ value: '', label: 'Unassigned' }, ...members.map((m) => ({ value: m.user_id, label: `${m.display_name} (@${m.username})` }))]} />
           </Field>
           <Field label="Final due date" htmlFor="t-due" error={formErrors.due_date ?? save.fieldErrors.due_date}>
             <input id="t-due" type="datetime-local" className="input" value={due} required aria-required="true" onChange={(e) => { setDue(e.target.value); if (formErrors.due_date) setFormErrors((f) => ({ ...f, due_date: undefined })); }} />

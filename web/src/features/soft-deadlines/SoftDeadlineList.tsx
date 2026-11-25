@@ -13,6 +13,8 @@ import { ApiError } from '../../services/apiClient';
 import { useRealtime } from '../../services/realtimeClient';
 import type { SoftDeadline, SoftDeadlinePriority } from '../../shared/types';
 import { formatDateTime } from '../../shared/format';
+import { Select } from '../../components/Select';
+import { Checkbox } from '../../components/Checkbox';
 import { Alert, Badge, EmptyState, Icon, RetryBanner, Spinner, type Tone } from '../../shared/ui';
 import { toApiError, useSave } from '../../shared/useSave';
 import { SoftDeadlineStateBadge } from './SoftDeadlineBadge';
@@ -56,9 +58,7 @@ function DeadlineControls({ title, date, time, priority, onTitle, onDate, onTime
       <input className="input" placeholder="Checkpoint, e.g. First draft" value={title} onChange={(e) => onTitle(e.target.value)} aria-label={`${idPrefix} soft deadline title`} maxLength={120} />
       <input className="input" type="date" value={date} max={maxDate} onChange={(e) => onDate(e.target.value)} aria-label={`${idPrefix} soft deadline date`} />
       <input className="input" type="time" value={time} onChange={(e) => onTime(e.target.value)} aria-label={`${idPrefix} soft deadline time`} />
-      <select className="input" value={priority} onChange={(e) => onPriority(e.target.value as SoftDeadlinePriority)} aria-label={`${idPrefix} soft deadline priority`}>
-        {SOFT_DEADLINE_PRIORITIES.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
-      </select>
+      <Select value={priority} onChange={(v) => onPriority(v as SoftDeadlinePriority)} ariaLabel={`${idPrefix} soft deadline priority`} options={SOFT_DEADLINE_PRIORITIES} />
     </div>
   );
 }
@@ -175,7 +175,7 @@ export function SoftDeadlineList({ taskId, taskDueDate, canManage }: Props) {
               </li>
             ) : (
               <li key={sd.id} className="flex min-h-14 items-center gap-3 border-b border-line py-2 last:border-b-0">
-                <input type="checkbox" className="h-5 w-5" checked={sd.is_completed} disabled={!canManage} onChange={() => void toggle(sd)} aria-label={`Mark ${sd.title} complete`} />
+                <Checkbox checked={sd.is_completed} disabled={!canManage} onChange={() => void toggle(sd)} ariaLabel={`Mark ${sd.title} complete`} />
                 <div className="min-w-0 flex-1">
                   <p className={`truncate text-[15px] font-semibold ${sd.is_completed ? 'text-muted line-through' : 'text-ink'}`}>{sd.title}</p>
                   <p className="text-[13px] text-muted">{formatDateTime(sd.due_at)}</p>
